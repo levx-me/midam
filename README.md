@@ -21,7 +21,7 @@
 
 Download the zip for your Mac from Releases: `Midam-<version>-apple-silicon.zip` (M-series) or `Midam-<version>-intel.zip`. Unzip it in Finder (double-click) or with `ditto -x -k <zip> .`, then move `Midam.app` to `/Applications`. Plain `unzip` drops parts of the app's signature.
 
-The app is ad-hoc signed, not notarized. On first open, right-click → Open, or run:
+The app is ad-hoc signed, not notarized, so macOS blocks the first open. Open it once and click Done, then go to System Settings → Privacy & Security, click Open Anyway next to the Midam message and confirm with your password. You only do this once. On macOS 14, Control-click the app → Open also works. Or clear the quarantine flag in Terminal:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Midam.app
@@ -80,4 +80,4 @@ Fonts and their licences: `Resources/Fonts/LICENSES/`. Themes: `Resources/THEMES
 
 ## License
 
-All rights reserved for now.
+[MIT](LICENSE)
