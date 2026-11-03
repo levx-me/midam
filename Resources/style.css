@@ -1,0 +1,270 @@
+:root {
+  color-scheme: light dark;
+  /* The page colours come from the colour theme (Resources/themes.json): render.js midamStyle()
+     sets them on <html> before the first render, the light or the dark theme as the appearance
+     says. Tokens: --bg --code-bg --hairline --find --text --muted --faint, the elements
+     --heading --marker --link --code --quote, and the code tokens --tk-*. */
+  --mark: color-mix(in srgb, var(--find) 18%, transparent);
+  --selection: color-mix(in srgb, var(--find) 22%, transparent);
+  --find-current: color-mix(in srgb, var(--find) 34%, transparent);
+  --accent: #2b2a27;      /* the app's ink accent, not themed; matches NSColor.accent */
+  --body: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Reading settings; render.js midamStyle() overrides these on <html>. A chosen font goes in
+     --font / --code-font as a quoted name and a comma, ahead of the system stacks, so Hangul
+     falls back to the system font when the chosen one has none. */
+  --scale: 1;
+  --tracking: 0em;
+  --leading: 2.05;
+  --para: 1.15em;
+  --measure: 36em;
+  --header: 40px;         /* the window's header; the page runs under it */
+}
+@media (prefers-color-scheme: dark) {
+  :root { --accent: #888480; }
+}
+
+html { background: var(--bg); color: var(--text); -webkit-text-size-adjust: none; }
+body {
+  margin: 0;
+  padding: calc(var(--header) + 52px) 40px 120px;
+  /* 16px in narrow windows, up to 18px in wide ones; the 36em measure keeps ~65-75 Latin
+     characters (~36 Hangul syllables) per line at every size. */
+  font: calc(clamp(16px, calc(13.6px + 0.36vw), 18px) * var(--scale))/var(--leading) var(--font,) var(--body);
+  letter-spacing: var(--tracking);
+  -webkit-font-smoothing: antialiased;
+  font-kerning: normal;
+}
+::selection { background: var(--selection); }
+body > #content {
+  max-width: var(--measure);
+  margin: 0 auto;
+  word-break: keep-all;        /* Hangul wraps between words, not inside them */
+  overflow-wrap: anywhere;     /* but long URLs and code still break */
+  hanging-punctuation: first allow-end last;
+}
+p, li { text-wrap: pretty; }
+body > #content > :first-child { margin-top: 0; }
+body > #content > :last-child { margin-bottom: 0; }
+
+p, ul, ol, blockquote, pre, table, figure, hr { margin: 0 0 var(--para); }
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 2em 0 0.6em;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: calc(-0.016em + var(--tracking));
+  scroll-margin-top: calc(var(--header) + 16px);
+}
+h1 { font-size: 2em; font-weight: 700; letter-spacing: calc(-0.026em + var(--tracking)); margin-top: 0.4em; }
+h2 { font-size: 1.45em; letter-spacing: calc(-0.022em + var(--tracking)); }
+h1, h2, h3 { text-wrap: balance; }
+h3 { font-size: 1.2em; }
+h4 { font-size: 1em; }
+h5, h6 { font-size: 0.875em; letter-spacing: calc(0.02em + var(--tracking)); }
+h1 + h2, h2 + h3, h3 + h4 { margin-top: 1em; }
+
+/* 읽기 wears the same colours as 원문, element for element, from the same tokens:
+   heading = .hljs-section, list marker = .hljs-bullet, link = the link text (body > #source .hljs-string),
+   code = .hljs-code, blockquote = .hljs-quote. Body text, bold and italic stay --text. */
+body > #content :is(h1, h2, h3, h4, h5, h6) { color: var(--heading); }
+
+a {
+  color: var(--link);
+  text-decoration: underline 1px color-mix(in srgb, var(--link) 40%, transparent);
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color 0.15s;
+}
+a:hover { text-decoration-color: var(--link); }
+strong { font-weight: 650; }
+
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.2em 0; }
+li > p { margin: 0 0 0.6em; }
+li > ul, li > ol { margin: 0.25em 0 0; }
+li::marker { color: var(--marker); }
+ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0.2em; }
+li > input[type="checkbox"] {
+  margin: 0 0.55em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--accent);
+}
+
+blockquote {
+  margin-left: 0;
+  padding: 0.1em 0 0.1em 1.2em;
+  border-left: 2px solid var(--quote);
+  color: var(--quote);
+}
+blockquote > :last-child { margin-bottom: 0; }
+
+hr { border: 0; border-top: 1px solid var(--hairline); margin: 2.4em 0; }
+
+code, pre, kbd { font-family: var(--code-font,) var(--mono); font-size: 0.875em; letter-spacing: 0; }
+:not(pre) > code {
+  color: var(--code);
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  background: var(--code-bg);
+}
+pre {
+  padding: 1em 1.2em;
+  border-radius: 6px;
+  background: var(--code-bg);
+  line-height: 1.55;
+  overflow-x: auto;
+  tab-size: 4;
+}
+/* The fence's colour, as a thin frame edge, softened so ink (Midam) stays a quiet line. */
+body > #content pre { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--code) 45%, transparent); }
+pre code { font-size: 1em; background: none; padding: 0; }
+kbd {
+  padding: 0.08em 0.4em;
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
+/* Tables keep their natural width and are never squeezed: each sits in a .table-wrap (render.js)
+   that scrolls sideways, laid out like the diagrams below. The table element is a block frame and
+   the table proper keeps its own width inside it. At the top level the frame is at least the
+   column's width (min(--measure, 100%) is exactly the column) and centred in the breakout box,
+   so a table that fits starts at the column's edge as before, and a wider one centres on the window.
+   Cells wrap only between words (Hangul by 어절) and at most 32em wide, so one long cell becomes a
+   paragraph; only code and links longer than that break inside. */
+table {
+  display: block;
+  width: max-content;
+  margin: 0;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+body > #content > .table-wrap > table { min-width: min(var(--measure), 100%); margin-inline: auto; }
+th, td { padding: 0.5em 1.1em 0.5em 0; border-bottom: 1px solid var(--hairline); max-width: 32em; overflow-wrap: normal; }
+:is(th, td) :is(code, a) { overflow-wrap: anywhere; }
+th:last-child, td:last-child { padding-right: 0; }
+th:not([align]) { text-align: left; }
+th { font-weight: 600; border-bottom-color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+
+img { max-width: 100%; height: auto; border-radius: 3px; }
+@media (prefers-color-scheme: dark) {
+  /* Ease the glare of photos on the dark page; SVG figures and images made for dark keep their colours. */
+  img:not([src$=".svg" i]):not([src^="data:image/svg" i]):not([src$="#gh-dark-mode-only" i]) { filter: brightness(0.88); }
+}
+/* GitHub's light/dark image variants (<picture> with prefers-color-scheme sources works by itself). */
+@media (prefers-color-scheme: light) { img[src$="#gh-dark-mode-only" i] { display: none; } }
+@media (prefers-color-scheme: dark) { img[src$="#gh-light-mode-only" i] { display: none; } }
+
+/* GitHub alerts (> [!NOTE] …): a framed note with an icon and a title in the kind's colour.
+   The monochrome theme keeps them ink on a hairline. */
+.alert {
+  --alert: var(--link);
+  margin: 0 0 var(--para);
+  padding: 0.7em 1em;
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--alert);
+  border-radius: 6px;
+}
+.alert-tip { --alert: var(--code); }
+.alert-important { --alert: var(--heading); }
+.alert-warning { --alert: var(--tk-type); }
+.alert-caution { --alert: var(--marker); }
+[data-mono] .alert { --alert: var(--text); border-left: 1px solid var(--hairline); }
+.alert-title { display: flex; align-items: center; gap: 0.5em; margin: 0 0 0.3em; font-weight: 600; color: var(--alert); }
+.alert-icon { flex: none; width: 1em; height: 1em; fill: currentColor; }
+.alert > :last-child { margin-bottom: 0; }
+
+/* Footnotes: a small numbered mark, the notes under a hairline at the end. */
+.footnote-ref { font-size: 0.75em; line-height: 0; }
+.footnote-ref a { text-decoration: none; padding: 0 0.12em; }
+.footnotes { margin-top: 3em; padding-top: 1.2em; border-top: 1px solid var(--hairline); font-size: 0.9em; }
+body > #content .footnotes-title { margin: 0 0 0.8em; font-size: 0.8em; font-weight: 600; color: var(--muted); letter-spacing: calc(0.02em + var(--tracking)); }
+.footnotes ol { margin-bottom: 0; }
+.footnote-back { text-decoration: none; margin-left: 0.15em; }
+.footnote-ref a, .footnotes li { scroll-margin-top: calc(var(--header) + 16px); }
+
+/* Math (KaTeX): display formulas scroll sideways rather than overflow the column. */
+.math-display { margin: 0 0 var(--para); overflow-x: auto; overflow-y: hidden; }
+.math-display > .katex-display, p > .katex-display { margin: 0.4em 0; }
+.math-error { color: var(--marker); }
+
+/* Mermaid diagrams, at their natural size, scrolling inside the figure when wider than it, with a
+   soft shadow at the clipped edge. A top-level figure spans the body's content box (the window
+   less the page's side padding, 100cqw of <body>) and centres the drawing on it, which is also the
+   column's centre: a narrow diagram sits in the column as before, a wide one uses the window's
+   width. One inside a list, quote or alert stays within that box, so nothing ever pushes the page
+   sideways. A failed diagram shows its code in the column. */
+/* Mermaid draws each diagram in a scratch element it appends to <body> and measures there, while
+   the new content is still built off-screen: on a fresh page that scratch would show at the top,
+   small and changing, until the finished page swaps in. Hidden, it keeps its layout and sizes. */
+body > :not(#content, #source) { visibility: hidden !important; }
+body { container-type: inline-size; }
+body > #content > :is(figure.diagram, .table-wrap) {
+  width: 100cqw;
+  margin-inline: calc((100% - 100cqw) / 2);
+}
+figure.diagram, .table-wrap { /* tables (above) scroll the same way */
+  margin: 0 0 var(--para); /* also drops the UA's 40px figure indent */
+  overflow-x: auto;
+  overflow-y: hidden;
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--text) 12%, transparent), transparent) left / 10px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--text) 12%, transparent), transparent) right / 10px 100% no-repeat scroll;
+}
+figure.diagram svg { display: block; margin-inline: auto; max-width: none; height: auto; } /* auto margins drop to 0 when wider: scrolls from the start */
+body > #content > figure.diagram:has(> pre), figure.diagram:has(> pre) { width: auto; margin-inline: 0; background: none; }
+figure.diagram pre { margin-bottom: 0.4em; }
+.diagram-error { margin: 0; font-size: 0.8em; color: var(--muted); }
+
+/* YAML front matter: keys and values, quiet, ahead of the document. */
+.front-matter :is(th, td) { font-size: 0.875em; } /* on the cells: the table's em sizes its column-wide frame */
+.front-matter th { color: var(--muted); font-weight: 600; vertical-align: top; white-space: nowrap; padding-right: 1.6em; border-bottom-color: var(--hairline); }
+.front-matter tr:last-child th { border-bottom: 0; }
+.fm-item { display: inline-block; margin: 0.1em 0.3em 0.1em 0; padding: 0 0.55em; border: 1px solid var(--hairline); border-radius: 999px; }
+@media (prefers-reduced-motion: reduce) { a { transition: none; } }
+/* Source view: the raw Markdown in the same column, wrapped, read-only. */
+html:not([data-view="source"]) body > #source, html[data-view="source"] body > #content { display: none; }
+body > #source {
+  max-width: calc(var(--measure) / 0.875); /* same column as #content at the smaller mono size */
+  margin: 0 auto;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+body > #source .hljs-section { font-weight: 650; }
+body > #source .hljs-string, body > #source .hljs-symbol { color: var(--link); } /* Markdown link text and [ref]: */
+
+/* highlight.js tokens */
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag { color: var(--tk-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-char.escape_, .hljs-template-tag { color: var(--tk-string); }
+.hljs-comment { color: var(--tk-comment); font-style: italic; }
+.hljs-quote { color: var(--quote); font-style: italic; }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-variable.constant_ { color: var(--tk-number); }
+.hljs-bullet { color: var(--marker); }
+.hljs-title, .hljs-selector-id, .hljs-selector-class { color: var(--tk-title); }
+.hljs-section { color: var(--heading); }
+[data-mono] :is(.hljs-keyword, .hljs-selector-tag, .hljs-doctag) { font-weight: 650; }
+.hljs-type, .hljs-built_in, .hljs-title.class_, .hljs-class .hljs-title { color: var(--tk-type); }
+.hljs-meta, .hljs-attr, .hljs-attribute, .hljs-property, .hljs-template-variable, .hljs-tag, .hljs-name { color: var(--tk-meta); }
+.hljs-deletion { color: var(--tk-number); }
+.hljs-code { color: var(--code); }
+.hljs-link { color: var(--faint); } /* a link's URL: secondary to its text */
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 650; }
+.hljs-meta .hljs-keyword, .hljs-meta .hljs-string { color: inherit; }
+.hljs-subst { color: var(--text); } /* interpolation reads as code inside the string */
+
+::highlight(midam-find) { background-color: var(--mark); }
+::highlight(midam-current) { background-color: var(--find-current); }
+
+mark { background: var(--mark); color: inherit; padding: 0 0.15em; }
+
+@media (max-width: 560px) { body { padding: calc(var(--header) + 48px) 22px 80px; } }
+
+iframe, object, embed { display: none; } /* blocked by CSP anyway */
