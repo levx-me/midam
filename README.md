@@ -3,7 +3,10 @@
 
 <p align="center">A calm, minimalist Markdown viewer for macOS.</p>
 
-> Screenshots are not available yet; they will be added once the UI settles.
+<p align="center">
+  <img src="docs/screenshots/light.png" width="49%" alt="Midam in the light Midam theme, with the table of contents open">
+  <img src="docs/screenshots/dark.png" width="49%" alt="Midam in the dark Catppuccin Mocha theme, showing a Mermaid diagram and KaTeX math">
+</p>
 
 ## Features
 
@@ -16,6 +19,9 @@
 - Back / forward through links, anchors and tab switches
 - Reading settings and bundled fonts
 - English and Korean
+
+<p align="center"><img src="docs/screenshots/live-reload.gif" width="720" alt="A plan.md file growing section by section while Midam redraws each change"></p>
+<p align="center"><sub>Live reload: the page follows the file as it changes.</sub></p>
 
 ## Install
 
