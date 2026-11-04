@@ -539,6 +539,17 @@ struct ReaderView: View {
         .frame(minWidth: side + Self.minPage, minHeight: 320) // the window's narrowest: the panel can float
         .animation(reduceMotion ? nil : .smooth, value: store.sidebarOpen)
         .animation(reduceMotion ? nil : .smooth, value: store.panelOpen)
+        .overlay(alignment: .topTrailing) { // the panel button: one place, open or closed, at the header's right end
+            PanelToggle(store: store)
+                .frame(width: TitleStrip.capsule, height: TitleStrip.capsule) // alone: a circle
+                .glassCapsule()
+                .padding(.top, store.rowTop)
+                .padding(.trailing, 10)
+                .opacity(store.immersive ? 0 : 1) // as the header's
+                .allowsHitTesting(!store.immersive)
+                .accessibilityHidden(store.immersive)
+                .animation(reduceMotion ? nil : .smooth, value: store.immersive)
+        }
         .overlay { TipLayer() }
         .coordinateSpace(.named(Tips.space))
         // The page runs to the top of the window and scrolls under the floating capsules;
@@ -582,11 +593,11 @@ final class ReaderHost: NSHostingView<ReaderView> {
 
 /// The header: a row of floating glass over the page, on the traffic lights' line in a window:
 /// the sidebar button (as Safari's) while the sidebar is hidden, ‹ › (back, forward), the tabs' capsule, and at the right the
-/// source button and the panel button (in the panel's own strip while it is docked). Empty space in the header drags the window.
+/// source button; the panel button floats at the window's right end (ReaderView), so the row leaves
+/// it room unless the panel is docked. Empty space in the header drags the window.
 struct TitleStrip: View {
     @ObservedObject var store: Store
     let panelDocked: Bool
-    @Namespace private var glass
 
     /// The capsules' height: centred on the lights' line (16 pt down), 26 pt leaves 3 pt above
     /// them. Labels and the 28 pt icon targets keep their size.
@@ -617,22 +628,11 @@ struct TitleStrip: View {
                     .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
             }
             Spacer(minLength: 0)
-            let page = store.current?.page
-            if page != nil || !panelDocked {
-                let both = page != nil && !panelDocked
-                let tools = HStack(spacing: 0) {
-                    if let page { SourceToggle(page: page) }
-                    if !panelDocked { PanelToggle(store: store) }
-                }
-                .padding(.horizontal, both ? 3 : 0)
-                .frame(width: both ? nil : Self.capsule, height: Self.capsule) // alone: a circle
-                .glassCapsule()
-                .fixedSize()
-                if #available(macOS 26, *) {
-                    GlassEffectContainer { tools.glassEffectID("tools", in: glass) } // the glass morphs as it changes
-                } else {
-                    tools
-                }
+            if let page = store.current?.page {
+                SourceToggle(page: page)
+                    .frame(width: Self.capsule, height: Self.capsule) // alone: a circle
+                    .glassCapsule()
+                    .fixedSize()
             }
         }
         // Immersive mode: faded out and out of reach, but kept in place. The drag strip stays.
@@ -641,7 +641,7 @@ struct TitleStrip: View {
         .accessibilityHidden(store.immersive)
         .frame(height: Self.capsule)
         .padding(.leading, store.sidebarOpen ? 10 : store.rowLeading) // the lights sit over the sidebar
-        .padding(.trailing, 10)
+        .padding(.trailing, panelDocked ? 10 : 10 + Self.capsule + 8)
         .padding(.top, store.rowTop)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)

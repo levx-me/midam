@@ -32,9 +32,10 @@ enum PanelTab: String, CaseIterable {
     }
 }
 
-/// The docked panel, an inspector beside the page: the sidebar's material and edge, a strip on the
-/// header's line holding the panel button at the far right, then the panel. A strip at its left
-/// edge resizes it (width remembered), as SidebarColumn's at the sidebar's right.
+/// The docked panel, an inspector beside the page: the sidebar's material and edge, the header's
+/// band (the panel button floats over its right end, as it does over the page while the panel is
+/// closed), then the panel. A strip at its left edge resizes it (width remembered), as
+/// SidebarColumn's at the sidebar's right.
 struct PanelColumn: View {
     @ObservedObject var store: Store
     @AppStorage(PanelColumn.widthKey) private var width = PanelColumn.defaultWidth
@@ -46,12 +47,6 @@ struct PanelColumn: View {
     var body: some View {
         VStack(spacing: 0) {
             WindowDragArea().frame(height: store.fullScreen ? 6 + TitleStrip.capsule + 6 : store.header)
-                .overlay(alignment: .topTrailing) { // on the lights' line, clear of the drag gesture
-                    PanelToggle(store: store)
-                        .frame(height: TitleStrip.capsule)
-                        .padding(.top, store.rowTop)
-                        .padding(.trailing, 10)
-                }
             PanelBody(store: store)
         }
         .frame(width: Self.clamp(width))
@@ -96,15 +91,15 @@ struct FloatingPanel: View {
     }
 }
 
-/// The panel itself: the tab switcher across its top, then the tab showing.
+/// The panel itself: the tab row across its top over a hairline, then the tab showing. Everything
+/// in it keeps one inset: text and fields' icons at 16 pt, highlights and fields' edges at 8.
 private struct PanelBody: View {
     @ObservedObject var store: Store
 
     var body: some View {
         VStack(spacing: 0) {
             PanelTabs(store: store)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+            Divider()
             Group {
                 if store.panelTab == .shortcuts { ShortcutsList() }
                 else if let page = store.current?.page {
@@ -114,6 +109,7 @@ private struct PanelBody: View {
                     PanelHint(text: Text("No Document Open"))
                 }
             }
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .accessibilityElement(children: .contain)
@@ -121,38 +117,62 @@ private struct PanelBody: View {
     }
 }
 
-/// The panel button: `sidebar.right`, the mirror of the sidebar's.
+/// The panel button: `sidebar.right`, the mirror of the sidebar's, always at the header's right end
+/// (ReaderView), in ink while the panel shows.
 struct PanelToggle: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        StripIcon(label: store.panelOpen ? "Hide Panel" : "Show Panel", keys: [.panel],
+        StripIcon(label: store.panelOpen ? "Hide Panel" : "Show Panel", keys: [.panel], active: store.panelOpen,
                   action: { store.panelOpen.toggle() }) { // animated as from the keys, by ReaderView
             Image(systemName: "sidebar.right")
         }
+        .accessibilityAddTraits(store.panelOpen ? [.isToggle, .isSelected] : .isToggle)
     }
 }
 
-/// The tab switcher: the system's segmented control, icons only, across the panel's width (glass
-/// on macOS 26 by itself). Each segment's name is its tooltip and its VoiceOver label.
+/// The tab row, as Xcode's inspector selector: equal-width icon buttons across the panel, the
+/// showing tab in the accent colour on a soft plate. Each one's name is its tooltip and its label.
 private struct PanelTabs: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        Picker("Panel", selection: Binding(get: { store.panelTab }, set: { tab in
-            store.panelTab = tab
-            if tab == .find { store.current?.page.focusField() }
-        })) {
+        HStack(spacing: 2) {
             ForEach(PanelTab.allCases, id: \.self) { tab in
-                Image(systemName: tab.symbol)
-                    .accessibilityLabel(tab.title)
-                    .help(Text(tab.title) + Text(verbatim: " (\(tab.keys.map(\.glyph).joined(separator: ", ")))"))
-                    .tag(tab)
+                PanelTabButton(tab: tab, on: store.panelTab == tab) {
+                    store.panelTab = tab
+                    if tab == .find { store.current?.page.focusField() }
+                }
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct PanelTabButton: View {
+    let tab: PanelTab
+    let on: Bool
+    let action: () -> Void
+    @State private var hover = false
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let glyphs = tab.keys.map(\.glyph).joined(separator: ", ")
+        Button(action: action) {
+            Image(systemName: tab.symbol)
+                .font(.system(size: 14))
+                .foregroundStyle(on ? AnyShapeStyle(Color.accentColor) : GlassLabel.style(strong: hover, opaque: reduceTransparency))
+                .frame(maxWidth: .infinity, minHeight: 26)
+                .background(Color.primary.opacity(on ? 0.08 : hover ? 0.04 : 0), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(tab.title)
+        .accessibilityHint(Text(verbatim: glyphs))
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .fastTip(Text(tab.title) + Text(verbatim: " (\(glyphs))"))
     }
 }
 
@@ -167,8 +187,8 @@ struct PanelHint: View {
             .foregroundStyle(GlassLabel.style(strong: false, opaque: reduceTransparency))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
             .frame(maxWidth: .infinity)
     }
 }
@@ -185,7 +205,7 @@ private struct FindTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            field.padding(.horizontal, 10)
+            field.padding(.horizontal, 8)
             if page.query.isEmpty {
                 PanelHint(text: Text("Type to find in this document.") + Text(verbatim: "\n") + Text("Next") +
                           Text(verbatim: " \(KeyboardShortcut.findNext.glyph) · ") + Text("Previous") +
@@ -224,7 +244,7 @@ private struct FindTab: View {
             }
         }
         .font(.system(size: 13))
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 8)
         .frame(height: 28)
         .background(Color.primary.opacity(0.06), in: Capsule())
         .overlay(Capsule().strokeBorder(Color(nsColor: .hairline), lineWidth: 1))
@@ -262,7 +282,7 @@ private struct FindTab: View {
                         FindRow(match: m, current: m.id == page.index - 1) { page.go(to: m) }.id(m.id)
                     }
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 10)
             }
             .onChange(of: page.index, initial: true) { _, i in proxy.scrollTo(i - 1) } // the current row in view
