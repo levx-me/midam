@@ -316,7 +316,26 @@ const read = f => fs.readFileSync(R + f, "utf8");
     L.src.length === 5 && L.src[1] === "Setup › Install | [deposit] now." && L.src[3].startsWith("Setup › Use | let [deposit] = 2;"), L.src);
   check("find list: capped at 500, the count is every match", L.many[0] === 700 && L.many[1] === 500 && L.many[2] === "Deposit", L.many);
 
+  // V6: a selection's source lines (start block's first, end block's last), and a line scrolled to.
+  const S = await page.evaluate(async () => {
+    await midamRender("# Plan\n\nFirst para\nstill first.\n\n- one\n- two\n\nLast para.\n", "", { memo: "Note" });
+    const sel = getSelection(), r = document.createRange(), c = document.querySelector("body > #content");
+    const p = c.querySelector("p"), li = c.querySelectorAll("li")[1];
+    r.setStart(p.firstChild, 6); r.setEnd(li.firstChild, 2);
+    sel.removeAllRanges(); sel.addRange(r);
+    const s = midamSelection();
+    await new Promise(f => setTimeout(f, 300));
+    const button = document.getElementById("midam-note"), shown = button && !button.hidden && getComputedStyle(button).visibility === "visible";
+    sel.removeAllRanges();
+    const none = midamSelection();
+    return { s, none, shown, label: button?.textContent, go: midamGoLine(7, false), miss: midamGoLine(99, false) };
+  });
+  check("note: selection from a paragraph into a list item spans their source lines", S.s && S.s.start === 3 && S.s.end === 7 && S.s.quote.startsWith("para"), S.s);
+  check("note: nothing selected, no note", S.none === null, S.none);
+  check("note: the Note button shows by a selection, with its word", S.shown && S.label === "Note", S);
+  check("go to line: a line inside a block finds it; past the end finds nothing", S.go === true && S.miss === false, S);
+
   await browser.close();
-  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find boxes, find list)`);
+  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find boxes, find list, note lines)`);
   process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("FAILED", e); process.exit(1); });

@@ -706,10 +706,87 @@ function midamChangeStep(d) {
   if (i < 0) i = d > 0 ? 0 : places.length - 1;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   scrollBy({ top: tops[i] - line, behavior: reduce ? "auto" : "smooth" });
-  const e = places[i];
+  flash(places[i]);
+  return { index: i + 1, count: places.length };
+}
+function flash(e) {
   e.classList.remove("midam-flash");
   void e.offsetWidth; // restart the animation
   e.classList.add("midam-flash");
   setTimeout(() => e.classList.remove("midam-flash"), 1200);
-  return { index: i + 1, count: places.length };
+}
+
+// V6 reply. The source lines an element came from: its nearest data-src (markdown.js), [first, last].
+function srcLines(node) {
+  const el = (node?.nodeType === 1 ? node : node?.parentElement)?.closest("[data-src]");
+  const m = el && /^(\d+)-(\d+)$/.exec(el.getAttribute("data-src"));
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+// The selected passage in the reading view, for a note: {quote, start, end} (source lines of the
+// blocks the selection starts and ends in), or null.
+function midamSelection() {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount || document.documentElement.dataset.view === "source") return null;
+  const r = sel.getRangeAt(0), content = document.querySelector("body > #content");
+  if (!content?.contains(r.commonAncestorContainer)) return null;
+  // A triple click ends at the start of the next block: that block is not part of it.
+  const endNode = r.endOffset === 0 && r.endContainer !== r.startContainer
+    ? (r.endContainer.previousSibling ?? r.endContainer.parentElement?.previousElementSibling ?? r.endContainer) : r.endContainer;
+  const quote = sel.toString().trim(), a = srcLines(r.startContainer), b = srcLines(endNode) ?? a;
+  if (!quote || !a) return null;
+  return { quote, start: Math.min(a[0], b[0]), end: Math.max(a[1], b[1]) };
+}
+
+// The 메모 / Note button by a selection; a click asks the app for a note (as the m key does).
+let noteButton = null, noteTimer = 0;
+function placeNoteButton() {
+  const s = midamSelection();
+  if (!s) { if (noteButton) noteButton.hidden = true; return; }
+  if (!noteButton) {
+    noteButton = document.createElement("button");
+    noteButton.id = "midam-note";
+    noteButton.type = "button";
+    noteButton.addEventListener("mousedown", e => e.preventDefault()); // keeps the selection
+    noteButton.addEventListener("click", () => {
+      noteButton.hidden = true;
+      window.webkit?.messageHandlers?.midamToc?.postMessage({ note: true });
+    });
+    document.body.appendChild(noteButton);
+  }
+  noteButton.textContent = diagramWords.memo || "Note";
+  const rects = getSelection().getRangeAt(0).getClientRects(), last = rects[rects.length - 1];
+  if (!last) return;
+  noteButton.hidden = false;
+  noteButton.style.top = `${last.bottom + scrollY + 6}px`;
+  noteButton.style.left = `${Math.max(8, Math.min(last.right - noteButton.offsetWidth, innerWidth - noteButton.offsetWidth - 16)) + scrollX}px`;
+}
+globalThis.document?.addEventListener("selectionchange", () => {
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(placeNoteButton, 120);
+});
+
+// Scrolls source line n under the header and flashes it: the innermost block holding it, else the
+// first one after it. For a note's row and midam://open?line=.
+function midamGoLine(n, smooth) {
+  let best = null, span = Infinity, after = null;
+  for (const el of document.querySelectorAll("body > #content [data-src]")) {
+    const l = srcLines(el);
+    if (!l) continue;
+    if (l[0] <= n && n <= l[1] && l[1] - l[0] <= span) { best = el; span = l[1] - l[0]; }
+    else if (!after && l[0] > n) after = el;
+  }
+  const el = best || after;
+  if (!el) return false;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  scrollBy({ top: el.getBoundingClientRect().top - (headerInset + 24), behavior: smooth && !reduce ? "smooth" : "auto" });
+  flash(el);
+  return true;
+}
+
+// A link's #fragment, or midam-line-<n> for a source line (Store.handle).
+function midamScrollTo(id) {
+  const m = /^midam-line-(\d+)$/.exec(id);
+  if (m) return midamGoLine(Number(m[1]), false);
+  document.getElementById(id)?.scrollIntoView();
 }

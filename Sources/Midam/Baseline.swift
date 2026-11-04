@@ -5,12 +5,14 @@ import Foundation
 /// SHA-256 of its realpath(3), or of the path as given when it does not exist. realpath, not URL
 /// standardizing, which keeps /tmp and /private/tmp apart.
 enum DocKey {
+    static func path(_ path: String) -> String {
+        guard let r = realpath(path, nil) else { return path }
+        defer { free(r) }
+        return String(cString: r)
+    }
+
     static func hash(_ path: String) -> String {
-        let real = realpath(path, nil).map { p in
-            defer { free(p) }
-            return String(cString: p)
-        } ?? path
-        return SHA256.hash(data: Data(real.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(Self.path(path).utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 

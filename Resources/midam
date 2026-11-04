@@ -1,0 +1,269 @@
+#!/bin/sh
+# midam: open a Markdown document in Midam, or ask the person reading it for a review.
+# Lives in Midam.app/Contents/Resources/midam; Settings symlinks it to ~/.local/bin/midam.
+# Talks to the app through midam:// URLs (see Sources/Midam/ReviewRequest.swift). No python, no jq:
+# percent-encoding and JSON go through osascript (JavaScript), which every Mac has.
+#
+# Document key (shared with the app): sha256 of `realpath <file>`, lowercase hex, used to name
+# ~/Library/Application Support/Midam/{Replies/<key>.json,Baselines/<key>}.
+set -u
+
+NAME=midam
+SELF=$(realpath "$0" 2>/dev/null || printf %s "$0")
+RES=$(dirname "$SELF")
+SUPPORT=${MIDAM_SUPPORT:-$HOME/Library/Application Support/Midam}
+DEFAULT_TIMEOUT=3600
+
+usage_main() {
+  cat <<'EOF'
+midam: open a Markdown document in Midam, or ask the person reading it for a review.
+
+Usage:
+  midam open <path>[:line]                        Show a document (at a source line) in Midam.
+  midam review <path> [--wait] [--timeout <s>]    Ask for a review; with --wait, block for the reply.
+  midam status <path> [--json]                    What Midam knows about a document.
+
+Options:
+  -h, --help       Show help (also after any subcommand).
+      --version    Print the version.
+  -q, --quiet      Print only the result; no progress messages.
+
+Examples:
+  midam open docs/plan.md:40
+  midam review docs/plan.md --wait --timeout 600     # reply Markdown on stdout
+  midam status docs/plan.md --json
+
+Exit codes:
+  0 ok / approved    10 changes requested    20 timed out waiting
+  2 no such file     3 Midam not available   64 usage error    1 other error
+Run `midam <command> --help` for details.
+EOF
+}
+
+usage_open() {
+  cat <<'EOF'
+Usage: midam open <path>[:line] [--quiet]
+
+Shows the document in Midam and scrolls to the 1-based source line, if given. Relative paths are
+resolved against the current directory. Only Markdown files (.md .markdown .mdown .mkd).
+
+Examples:
+  midam open README.md
+  midam open docs/plan.md:40
+
+Exit: 0 opened, 2 no such file, 3 Midam not available, 64 usage.
+EOF
+}
+
+usage_review() {
+  cat <<'EOF'
+Usage: midam review <path> [--wait] [--timeout <seconds>] [--json] [--quiet]
+
+Opens the document in Midam for review. Without --wait that is all: exit 0 at once.
+With --wait it blocks until the reader sends a reply, then prints the reply as Markdown on stdout
+(with --json: {"path","verdict","reply"}) and exits 0 when approved, 10 when changes are requested.
+--timeout 0 waits forever (default $MIDAM_TIMEOUT or 3600 s); on timeout exit 20. Ctrl-C exits 130.
+The reply travels through a private temporary directory that is removed on exit.
+
+Examples:
+  midam review docs/plan.md --wait --timeout 900
+  midam review docs/plan.md --wait --json
+
+Exit: 0 approved, 10 changes requested, 20 timed out, 2 no such file, 3 Midam not available, 64 usage.
+EOF
+}
+
+usage_status() {
+  cat <<'EOF'
+Usage: midam status <path> [--json] [--quiet]
+
+Prints what is known about a document: whether it exists, whether Midam is running, the number of
+notes in its unsent reply draft, the draft verdict (approve|changes|null) and when Midam last
+showed it (lastRead, ISO-8601 UTC, or null).
+
+Examples:
+  midam status docs/plan.md --json
+  {"path":"/p/docs/plan.md","exists":true,"midamRunning":true,"notes":2,"verdict":"changes","lastRead":"2026-11-05T09:30:00Z"}
+
+Exit: 0 (also when the file does not exist: see "exists"), 64 usage.
+EOF
+}
+
+say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&2; }
+die() { code=$1; shift; printf 'midam: %s\n' "$*" >&2; exit "$code"; }
+bad() { printf 'midam: %s\nTry `midam --help`.\n' "$*" >&2; exit 64; }
+
+# Percent-encodes one value (everything but unreserved characters, UTF-8 aware).
+urlenc() {
+  osascript -l JavaScript -e 'function run(a){return encodeURIComponent(a[0].slice(1))}' "x$1" 2>/dev/null \
+    || die 1 "osascript failed; cannot encode the path"
+}
+
+# Prints JSON built by a JavaScript snippet from the arguments; each is prefixed with "x" so one
+# starting with "-" is never taken for an osascript option.
+json() {
+  js=$1; shift
+  osascript -l JavaScript -e "function run(a){a=a.map(function(s){return s.slice(1)});$js}" "$@" 2>/dev/null \
+    || die 1 "osascript failed; cannot build JSON"
+}
+
+sha() { printf %s "$1" | shasum -a 256 | cut -d' ' -f1; }
+
+# Midam's own URL handler target: this bundle if we live in one, else whatever `open` finds.
+APP=
+if [ -x "$RES/../MacOS/Midam" ]; then APP=$(cd "$RES/../.." && pwd -P); fi
+
+open_url() {
+  if [ -n "${MIDAM_OPEN:-}" ]; then "$MIDAM_OPEN" "$1" || die 3 "MIDAM_OPEN failed"; return; fi
+  if [ -n "$APP" ]; then open -a "$APP" "$1" 2>/dev/null || die 3 "cannot open $APP"
+  else
+    open -Ra Midam 2>/dev/null || die 3 "Midam is not installed. Get it from the Midam project, or install Midam.app first."
+    open "$1" 2>/dev/null || die 3 "Midam could not be opened"
+  fi
+}
+
+# resolve_doc <arg> -> DOC (real absolute path) and LINE (empty or positive integer).
+resolve_doc() {
+  arg=$1; LINE=
+  case $arg in /*) ;; *) arg=$PWD/$arg ;; esac
+  if [ ! -e "$arg" ]; then
+    case $arg in
+      *:[0-9]*) l=${arg##*:}
+        case $l in *[!0-9]*) ;; *) LINE=$l; arg=${arg%:*} ;; esac ;;
+    esac
+  fi
+  [ -e "$arg" ] || die 2 "no such file: $1"
+  [ -f "$arg" ] || die 2 "not a file: $1"
+  [ -z "$LINE" ] || [ "$LINE" -ge 1 ] 2>/dev/null || bad "line must be a positive number: $1"
+  DOC=$(realpath "$arg") || die 2 "cannot resolve $1"
+}
+
+need_markdown() {
+  case $DOC in
+    *.[mM][dD]|*.[mM][aA][rR][kK][dD][oO][wW][nN]|*.[mM][dD][oO][wW][nN]|*.[mM][kK][dD]) ;;
+    *) bad "not a Markdown file (.md .markdown .mdown .mkd): $DOC" ;;
+  esac
+}
+
+# parse_flags <args...>: sets JSON WAIT TIMEOUT QUIET HELP and POS (the single positional).
+parse_flags() {
+  POS=; npos=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -h|--help) HELP=1 ;;
+      -q|--quiet) QUIET=1 ;;
+      --json) JSON=1 ;;
+      --wait) WAIT=1 ;;
+      --timeout) [ $# -ge 2 ] || bad "--timeout needs seconds"; TIMEOUT=$2; shift ;;
+      --timeout=*) TIMEOUT=${1#--timeout=} ;;
+      --) shift; for a in "$@"; do POS=$a; npos=$((npos + 1)); done; break ;;
+      -?*) bad "unknown option: $1" ;;
+      *) POS=$1; npos=$((npos + 1)) ;;
+    esac
+    shift
+  done
+  [ "$HELP" = 1 ] && return 0
+  [ "$npos" -ge 1 ] || bad "missing <path>"
+  [ "$npos" -le 1 ] || bad "one <path> at a time"
+  case $TIMEOUT in ''|*[!0-9]*) bad "--timeout takes whole seconds" ;; esac
+}
+
+QUIET=0 JSON=0 WAIT=0 HELP=0
+TIMEOUT=${MIDAM_TIMEOUT:-$DEFAULT_TIMEOUT}
+
+cmd_open() {
+  parse_flags "$@"
+  [ "$HELP" = 1 ] && { usage_open; exit 0; }
+  resolve_doc "$POS"; need_markdown
+  url="midam://open?path=$(urlenc "$DOC")"
+  [ -z "$LINE" ] || url="$url&line=$LINE"
+  open_url "$url"
+  say "Opened $DOC${LINE:+ at line $LINE}"
+}
+
+DIR=
+cleanup() {
+  case $DIR in */midam-review.??????) rm -rf "$DIR" ;; esac
+}
+
+cmd_review() {
+  parse_flags "$@"
+  [ "$HELP" = 1 ] && { usage_review; exit 0; }
+  resolve_doc "$POS"; need_markdown
+  url="midam://review?path=$(urlenc "$DOC")"
+  if [ "$WAIT" != 1 ]; then
+    open_url "$url"
+    say "Opened $DOC for review"
+    return 0
+  fi
+  # The app only accepts a reply dir directly inside the user's temp dir, so prefer that one.
+  base=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)
+  { [ -d "$base" ] && [ -w "$base" ]; } || base=${TMPDIR:-/tmp}
+  DIR=$(mktemp -d "${base%/}/midam-review.XXXXXX") || die 1 "cannot create a temporary directory in $base"
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  chmod 700 "$DIR" || die 1 "cannot secure $DIR"
+  open_url "$url&reply=$(urlenc "$DIR/reply.md")"
+  if [ "$TIMEOUT" -gt 0 ]; then say "Waiting for the review of $DOC in Midam (up to $TIMEOUT s, Ctrl-C to stop)..."
+  else say "Waiting for the review of $DOC in Midam (Ctrl-C to stop)..."; fi
+  start=$(date +%s)
+  while [ ! -f "$DIR/verdict" ]; do
+    if [ "$TIMEOUT" -gt 0 ] && [ $(( $(date +%s) - start )) -ge "$TIMEOUT" ]; then
+      die 20 "timed out after $TIMEOUT s waiting for the review of $DOC"
+    fi
+    sleep 0.5
+  done
+  verdict=$(cat "$DIR/verdict")
+  case $verdict in approve|changes) ;; *) die 1 "unexpected verdict from Midam" ;; esac
+  reply=
+  [ -f "$DIR/reply.md" ] && reply=$(cat "$DIR/reply.md")
+  if [ "$JSON" = 1 ]; then
+    json 'return JSON.stringify({path:a[0],verdict:a[1],reply:a[2]})' "x$DOC" "x$verdict" "x$reply"
+  else
+    printf '%s\n' "$reply"
+  fi
+  [ "$verdict" = approve ] && exit 0
+  exit 10
+}
+
+cmd_status() {
+  parse_flags "$@"
+  [ "$HELP" = 1 ] && { usage_status; exit 0; }
+  case $POS in /*) path=$POS ;; *) path=$PWD/$POS ;; esac
+  exists=false
+  [ -f "$path" ] && exists=true
+  real=$(realpath "$path" 2>/dev/null) || real=$path
+  key=$(sha "$real")
+  running=false
+  pgrep -x Midam >/dev/null 2>&1 && running=true
+  draft=
+  [ -f "$SUPPORT/Replies/$key.json" ] && draft=$(cat "$SUPPORT/Replies/$key.json" 2>/dev/null)
+  lastread=
+  if [ -f "$SUPPORT/Baselines/$key" ]; then
+    secs=$(stat -f %m "$SUPPORT/Baselines/$key" 2>/dev/null) && lastread=$(date -u -r "$secs" +%Y-%m-%dT%H:%M:%SZ)
+  fi
+  out=$(json 'var n=0,v=null;try{var d=JSON.parse(a[4]);n=(d.notes||[]).length;v=d.verdict||null}catch(e){}
+    return JSON.stringify({path:a[0],exists:a[1]=="true",midamRunning:a[2]=="true",notes:n,verdict:v,lastRead:a[3]||null})' \
+    "x$real" "x$exists" "x$running" "x$lastread" "x$draft") || exit $?
+  if [ "$JSON" = 1 ]; then printf '%s\n' "$out"; return 0; fi
+  notes=$(printf %s "$out" | sed 's/.*"notes":\([0-9]*\).*/\1/')
+  [ "$QUIET" = 1 ] && { printf '%s\n' "$notes"; return 0; }
+  printf '%s: %s, %s notes in draft, Midam %s\n' "$real" "$([ "$exists" = true ] && echo present || echo missing)" "$notes" \
+    "$([ "$running" = true ] && echo running || echo not running)"
+}
+
+version() {
+  v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RES/../Info.plist" 2>/dev/null) || v=unknown
+  printf 'midam %s\n' "$v"
+}
+
+[ $# -ge 1 ] || { usage_main >&2; exit 64; }
+case $1 in
+  -h|--help|help) usage_main ;;
+  --version|version) version ;;
+  open) shift; cmd_open "$@" ;;
+  review) shift; cmd_review "$@" ;;
+  status) shift; cmd_status "$@" ;;
+  *) bad "unknown command: $1" ;;
+esac

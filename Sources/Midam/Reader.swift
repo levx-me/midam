@@ -102,10 +102,10 @@ import UniformTypeIdentifiers
     }
     private static let sidebarKey = "sidebarOpen"
     private var keyMonitor: Any?
-    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, n N, / (find), x (close tab).
+    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, n N, m (note), / (find), x (close tab).
     private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .lineDown, .lineUp, .vimTop, .vimBottom,
                                          .halfPageDown, .halfPageUp, .halfPageUpE, .vimPageDown, .vimPageUp,
-                                         .findSlash, .closeTabX, .nextChange]
+                                         .findSlash, .closeTabX, .nextChange, .addNote]
                                          .map { String($0.key.character).lowercased() })
     /// The find field has focus: single-key Go shortcuts (Space, j, k, g, G) stand down.
     @Published var findFocused = false
@@ -144,6 +144,22 @@ import UniformTypeIdentifiers
             select(new)
         }
         showWindow()
+    }
+
+    /// A midam:// link (the `midam` command, ReviewRequest): open a document at a line, or open it
+    /// for review on the Reply tab, remembering the CLI waiting for the reply. Anything invalid is
+    /// only logged: any process can open such a link.
+    func handle(_ link: URL) {
+        switch ReviewRequest.parse(link) {
+        case .success(.open(let path, let line)):
+            open(URL(fileURLWithPath: path), fragment: line.map { "midam-line-\($0)" })
+        case .success(.review(let path, let reply)):
+            open(URL(fileURLWithPath: path))
+            if let reply, let f = file(at: URL(fileURLWithPath: path)) { f.page.waiting = reply; f.page.sent = nil }
+            show(.reply)
+        case .failure(let error):
+            NSLog("Midam: ignored a midam:// link (\(String(describing: error)))")
+        }
     }
 
     private func file(at url: URL) -> OpenFile? {
@@ -468,7 +484,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unless a scan is running or finished under a minute ago.
     func applicationDidBecomeActive(_ notification: Notification) { LibraryModel.shared.refresh() }
 
-    func application(_ application: NSApplication, open urls: [URL]) { Store.shared.open(urls) }
+    /// Files from Finder, the Dock and `open`; midam:// links from the `midam` command (Store.handle).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where !url.isFileURL { Store.shared.handle(url) }
+        Store.shared.open(urls.filter(\.isFileURL))
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         Store.shared.reopen()

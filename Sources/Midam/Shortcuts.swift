@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Every key the menus bind, named once: the menus use these, and the shortcuts help shows them,
 /// so the two cannot drift. Keys handled outside the menus (⇧⌘[ ], ⌃⌘F, ⌘1-8) are listed as text.
-/// Bare keys (Space, j k g G d u e f b, n N, /, x) are menu items too; Store.singleKeyBypass keeps
+/// Bare keys (Space, j k g G d u e f b, n N, m, /, x) are menu items too; Store.singleKeyBypass keeps
 /// them out of text fields and other windows.
 extension KeyboardShortcut {
     static let open = KeyboardShortcut("o")
@@ -44,13 +44,15 @@ extension KeyboardShortcut {
     static let vimPageUp = KeyboardShortcut("b", modifiers: [])
     static let nextChange = KeyboardShortcut("n", modifiers: []) // changes since last read, as Vim's next match
     static let previousChange = KeyboardShortcut("n", modifiers: .shift)
+    static let addNote = KeyboardShortcut("m", modifiers: []) // a note on the selected passage (V6)
+    static let sendReply = KeyboardShortcut(.return) // ⌘↩, as Mail's Send
     static let bigger = KeyboardShortcut("+")
     static let smaller = KeyboardShortcut("-")
     static let defaultSize = KeyboardShortcut("0")
 
     /// How the key reads in the help: ⌥⌘R, ⌃⇧Tab, Space; a single letter as typed (G for ⇧g).
     var glyph: String {
-        let names: [Character: String] = ["\u{F700}": "↑", "\u{F701}": "↓", " ": "Space", "\t": "Tab", "-": "−"]
+        let names: [Character: String] = ["\u{F700}": "↑", "\u{F701}": "↓", " ": "Space", "\t": "Tab", "-": "−", "\r": "↩"]
         let c = key.character, name = names[c] ?? String(c)
         if modifiers.isEmpty { return name }
         if modifiers == .shift, c.isLetter { return name.uppercased() }
@@ -117,6 +119,10 @@ struct ShortcutGroup {
             Shortcut("Search the sidebar (list focused)", .find),
             Shortcut("Next · previous match", .findNext, .findPrevious),
             Shortcut("Bigger · smaller · default size", .bigger, .smaller, .defaultSize),
+        ]),
+        ShortcutGroup("Reply", [
+            Shortcut("Note on the selected passage", .addNote),
+            Shortcut("Send Reply", .sendReply),
         ]),
         ShortcutGroup("Settings", [
             Shortcut("Keyboard Shortcuts", .shortcuts),

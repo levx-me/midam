@@ -52,10 +52,11 @@ Requires macOS 14 or later.
 for t in tools/*-test.js; do node "$t"; done   # rendering, math, diagrams, fonts, themes
 python3 tools/theme-contrast.py                 # WCAG AA for every theme
 python3 tools/strings-audit.py                  # en/ko strings complete
+sh tools/cli-test.sh                            # the midam command's exit codes
 swiftc Sources/Midam/TabOrder.swift tools/TabOrderTest/main.swift -o /tmp/taborder && /tmp/taborder
 ```
 
-The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest` and `tools/LibraryTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
+The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest` and `tools/ReplyTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
 
 ## Shortcuts
 
@@ -80,9 +81,25 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | Space / ⇧Space, ⌘↓ / ⌘↑ | Page down / up, bottom / top |
 | j / k, G / g | Line down / up, bottom / top (Vim style; off while typing in Find) |
 | d / u (or e), f / b | Half page down / up, full page down / up (Vimium style) |
+| m | Note on the selected passage (also the Add Note button by a selection); off while typing |
+| ⌘↩ | Send the reply: to the agent waiting in `midam review`, else to the clipboard |
 | ⌘, | Settings |
 
 Press ⌘' (or Help › Keyboard Shortcuts) to see this list in the panel's Shortcuts tab. Fonts and text size live in Settings (⌘,) and the Format menu.
+
+## Command line
+
+Settings › General › Command Line Tool › Install links `~/.local/bin/midam` to the script inside the app (no admin rights; Settings shows the line to add if that folder is not on your `PATH`).
+
+```sh
+midam open docs/plan.md:40            # open a document in Midam at line 40
+midam review docs/plan.md --wait      # open it on the Reply tab and wait; prints the reply Markdown
+midam review docs/plan.md --wait --timeout 600
+midam status docs/plan.md --json      # last read, draft notes, and so on
+midam --help
+```
+
+Select a passage and press `m` to note it; the panel's Reply tab collects the notes, a verdict (Approve / Request changes) and a summary, and ⌘↩ sends it. `midam review` exits 0 approved, 10 changes requested, 20 timed out (default 3600 s, `0` waits forever, or `$MIDAM_TIMEOUT`), 2 no such file, 3 Midam not available, 64 usage error. JSON goes to stdout, messages to stderr. The document itself is never changed.
 
 ## Third-party credits
 

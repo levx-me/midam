@@ -764,6 +764,68 @@ struct CacheSection: View {
     }
 }
 
+/// Install `midam` (V6): a link in ~/.local/bin to the script in the app (CLIInstaller), no admin
+/// rights. Says where it went, and the line to add when that folder is not on the login PATH.
+struct CommandLineSection: View {
+    @State private var result: String?
+    @State private var offPath = false
+    @State private var working = false
+
+    var body: some View {
+        Section {
+            LabeledContent {
+                Button("Install") { install() }
+                    .actionButton()
+                    .disabled(working)
+            } label: {
+                Text("Command Line Tool")
+                Text("Lets agents open documents and wait for your reply: midam open, midam review.")
+            }
+            if let result {
+                Text(verbatim: result)
+                    .foregroundStyle(Color(nsColor: .muted))
+                    .textSelection(.enabled)
+            }
+            if offPath {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("~/.local/bin is not on your PATH. Add this line to ~/.zshrc:")
+                    Text(verbatim: #"export PATH="$HOME/.local/bin:$PATH""#)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func install() {
+        working = true
+        Task {
+            // Off the main thread: it asks the login shell for PATH (up to 3 s).
+            let done = await Task.detached(priority: .userInitiated) { () -> Result<(link: URL, onPath: Bool), CLIInstallError> in
+                do { return .success(try CLIInstaller.install()) }
+                catch let e as CLIInstallError { return .failure(e) }
+                catch { return .failure(.failed(error.localizedDescription)) }
+            }.value
+            working = false
+            switch done {
+            case .success(let r):
+                result = String(format: String(localized: "Installed: %@"), (r.link.path as NSString).abbreviatingWithTildeInPath)
+                offPath = !r.onPath
+            case .failure(.occupied):
+                result = String(localized: "~/.local/bin/midam already exists and is not Midam's link")
+                offPath = false
+            case .failure(.missingScript):
+                result = String(localized: "The midam script is missing from this copy of Midam.")
+                offPath = false
+            case .failure(.failed(let why)):
+                result = String(format: String(localized: "Couldn't install: %@"), why)
+                offPath = false
+            }
+            AccessibilityNotification.Announcement(result ?? "").post()
+        }
+    }
+}
+
 struct ResetRow: View {
     var body: some View {
         HStack {
@@ -840,6 +902,7 @@ struct GeneralSettings: View {
             LanguageSection()
             HiddenProjectsSection()
             CacheSection()
+            CommandLineSection()
             ResetRow()
         }
         .formStyle(.grouped)

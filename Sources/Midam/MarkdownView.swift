@@ -60,6 +60,7 @@ struct MarkdownView: NSViewRepresentable {
         "footnotes": String(localized: "Footnotes"), "back": String(localized: "Back to reference"),
         "diagram": String(localized: "Diagram could not be drawn"),
         "deleted": String(localized: "Deleted: {words}, {n}"), "line": String(localized: "1 line"), "lines": String(localized: "{n} lines"),
+        "memo": String(localized: "Add Note"),
     ]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -303,7 +304,7 @@ struct MarkdownView: NSViewRepresentable {
         }
 
         private func scroll(to fragment: String) {
-            webView?.callAsyncJavaScript("document.getElementById(id)?.scrollIntoView()",
+            webView?.callAsyncJavaScript("midamScrollTo(id)",
                                          arguments: ["id": fragment.removingPercentEncoding ?? fragment], in: nil, in: world)
         }
 
@@ -399,8 +400,8 @@ struct MarkdownView: NSViewRepresentable {
 
 // Heading and the result decoding live in TocRules.swift (checked by tools/TocTest).
 
-/// Receives the id of the section being read from render.js, in the "midam" world only.
-/// Weak to its page: the content controller keeps the handler alive.
+/// Receives the id of the section being read from render.js, in the "midam" world only, and the
+/// Note button's {note: true} (V6). Weak to its page: the content controller keeps the handler alive.
 @MainActor final class TocSpy: NSObject, WKScriptMessageHandler {
     static let name = "midamToc"
     weak var page: Page?
@@ -408,8 +409,9 @@ struct MarkdownView: NSViewRepresentable {
     init(page: Page?) { self.page = page }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, message.body is String, let page else { return }
-        page.tocCurrent = page.tocAnchor(message.body)
+        guard message.frameInfo.isMainFrame, let page else { return }
+        if message.body is String { page.tocCurrent = page.tocAnchor(message.body) }
+        else if (message.body as? [String: Any])?["note"] != nil { page.addNote() }
     }
 }
 
@@ -649,7 +651,20 @@ final class PageWebView: WKWebView {
     /// Places changed since the version last read (V3), from the last render; 0 with no baseline.
     var changes = 0 { didSet { if let fileURL { SidebarChanges.shared.set(fileURL, changes) } } }
     @ObservationIgnored weak var webView: WKWebView?
-    @ObservationIgnored var fileURL: URL?
+    @ObservationIgnored var fileURL: URL? {
+        didSet { if let fileURL, fileURL != oldValue { reply = ReplyStore.load(fileURL.path) } }
+    }
+    /// The reply drafted on this document (V6), saved per document as it changes (ReplyStore),
+    /// never into the file itself.
+    var reply = Reply() {
+        didSet { if let fileURL, reply != oldValue { try? ReplyStore.save(reply, for: fileURL.path) } }
+    }
+    /// A `midam review --wait` waiting for this document's reply (its reply.md): Send delivers there.
+    var waiting: URL?
+    /// The note just added, whose field takes focus in the Reply tab.
+    var noteFocus: UUID?
+    /// What the last Send did, shown under the Send button.
+    var sent: String?
     @ObservationIgnored var reload: (() -> Void)?
     /// The version last read (nil: never read) and the text on screen now, which becomes it on leaving.
     @ObservationIgnored var baseline: String?
@@ -717,7 +732,7 @@ final class PageWebView: WKWebView {
 
     /// A link to a #fragment of a file that is already open.
     func scroll(to fragment: String) {
-        run("document.getElementById(id)?.scrollIntoView()", ["id": fragment.removingPercentEncoding ?? fragment])
+        run("midamScrollTo(id)", ["id": fragment.removingPercentEncoding ?? fragment])
     }
 
     /// A table of contents entry: the same jump as an #anchor link, recorded for Back, and smooth
@@ -762,6 +777,80 @@ final class PageWebView: WKWebView {
                   let i = r["index"] as? Int, let n = r["count"] as? Int else { return }
             AccessibilityNotification.Announcement(n == 0 ? String(localized: "No changes since last read") : String(format: String(localized: "Change %lld of %lld"), i, n)).post()
         }
+    }
+
+    /// m or the Note button: the selected passage becomes a note, its field focused in the Reply
+    /// tab. With nothing selected the tab opens on its hint.
+    func addNote() {
+        Store.shared.show(.reply)
+        guard let webView, let fileURL else { return }
+        webView.callAsyncJavaScript("return midamSelection()", arguments: [:], in: nil, in: world) { [weak self] result in
+            guard let self, case .success(let value) = result, let s = value as? [String: Any],
+                  let quote = s["quote"] as? String, let start = s["start"] as? Int, let end = s["end"] as? Int else {
+                return AccessibilityNotification.Announcement(String(localized: "Select a passage first")).post()
+            }
+            let note = Note(quote: quote, path: DocKey.path(fileURL.path), start: start, end: end, text: "")
+            self.reply.notes.append(note)
+            self.sent = nil
+            self.noteFocus = note.id
+        }
+    }
+
+    /// A note's row: its first line scrolled under the header and flashed.
+    func go(toLine line: Int) {
+        Store.shared.leaveHere()
+        webView?.callAsyncJavaScript("midamGoLine(n, true)", arguments: ["n": line], in: nil, in: world) { _ in }
+    }
+
+    /// The reply as Markdown, paths relative to the document's repository when it has one. All
+    /// realpaths (as the notes' and the CLI's): a file URL may have lost /private.
+    var replyMarkdown: String {
+        guard let fileURL else { return "" }
+        let real = URL(fileURLWithPath: DocKey.path(fileURL.path))
+        let words = ReplyWords(title: String(localized: "Review"), approve: String(localized: "Approve"),
+                               changes: String(localized: "Request changes"))
+        return reply.markdown(path: real.path, root: Self.repository(of: real), words: words)
+    }
+
+    /// Send (⌘↩): to the agent waiting in `midam review --wait`, else (or if it stopped waiting)
+    /// to the clipboard. The draft clears either way; the document is never touched.
+    func sendReply() {
+        guard reply != Reply(), fileURL != nil else {
+            return AccessibilityNotification.Announcement(String(localized: "Nothing to send yet")).post()
+        }
+        let markdown = replyMarkdown
+        var said = String(localized: "Copied to the clipboard"), delivered = false
+        if let waiting {
+            do {
+                // No verdict chosen: notes ask for changes, none approve.
+                try ReviewRequest.deliver(reply: markdown, verdict: reply.verdict ?? (reply.notes.isEmpty ? .approve : .changes), to: waiting)
+                said = String(localized: "Sent to the waiting agent")
+                delivered = true
+            } catch ReviewError.replyGone {
+                said = String(localized: "The agent stopped waiting. Copied to the clipboard instead.")
+            } catch {
+                NSLog("Midam: reply delivery failed: \(error)")
+                said = String(localized: "Couldn't reach the agent. Copied to the clipboard instead.")
+            }
+        }
+        if !delivered {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(markdown, forType: .string)
+        }
+        reply = Reply()
+        waiting = nil
+        sent = said
+        AccessibilityNotification.Announcement(said).post()
+    }
+
+    /// The nearest folder above `url` holding .git, for the reply's relative paths.
+    private static func repository(of url: URL) -> String? {
+        var dir = url.deletingLastPathComponent()
+        while dir.path != "/" {
+            if FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path) { return dir.path }
+            dir = dir.deletingLastPathComponent()
+        }
+        return nil
     }
 
     func setView(source: Bool) {

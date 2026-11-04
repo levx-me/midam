@@ -1,17 +1,18 @@
 import SwiftUI
 
-// The right panel: find in the page, the table of contents and the keyboard shortcuts, one tab
+// The right panel: find in the page, the table of contents, the keyboard shortcuts and the reply, one tab
 // at a time (Store.panelOpen, Store.panelTab). Docked beside the page as the sidebar is on the
 // left; floating over the page's right edge only when docking would leave the page too narrow.
 
 enum PanelTab: String, CaseIterable {
-    case find, toc, shortcuts
+    case find, toc, shortcuts, reply
 
     var title: LocalizedStringKey {
         switch self {
         case .find: "Find"
         case .toc: "Contents"
         case .shortcuts: "Shortcuts"
+        case .reply: "Reply"
         }
     }
 
@@ -20,6 +21,7 @@ enum PanelTab: String, CaseIterable {
         case .find: return "magnifyingglass"
         case .toc: return "list.bullet.indent"
         case .shortcuts: return "command"
+        case .reply: return "arrowshape.turn.up.left"
         }
     }
 
@@ -28,6 +30,7 @@ enum PanelTab: String, CaseIterable {
         case .find: [.find, .findSlash]
         case .toc: [.tableOfContents]
         case .shortcuts: [.shortcuts]
+        case .reply: [.addNote]
         }
     }
 }
@@ -104,6 +107,7 @@ private struct PanelBody: View {
                 if store.panelTab == .shortcuts { ShortcutsList() }
                 else if let page = store.current?.page {
                     if store.panelTab == .find { FindTab(page: page).id(ObjectIdentifier(page)) } // each tab its own field
+                    else if store.panelTab == .reply { ReplyTab(page: page).id(ObjectIdentifier(page)) }
                     else { TocList(page: page) }
                 } else {
                     PanelHint(text: Text("No Document Open"))
