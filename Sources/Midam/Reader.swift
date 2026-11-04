@@ -250,6 +250,8 @@ import UserNotifications
     func switchProject(_ root: String, fillDefault: Bool = true) {
         guard root != project else { return }
         if let project {
+            current?.page.markRead() // leaving the project is leaving the document (V3)
+            for f in files { SidebarChanges.shared.forget(f.url) } // parked: its pages are gone, the rows count from the files
             if let here = current { // cheap: the shown page's place, taken by its next first render
                 let key = here.url.standardizedFileURL
                 here.page.scrollOffset { MarkdownView.Coordinator.pendingOffsets[key] = $0 }
@@ -778,6 +780,7 @@ import UserNotifications
         history = NavHistory() // the places read went with the window
         current?.page.markRead()
         if !quitting {
+            for f in files { SidebarChanges.shared.forget(f.url) }
             files.removeAll() // stops every tab's watcher
             selected = agents.first?.id // agents keep running: the Dock brings their tabs back
             save()
