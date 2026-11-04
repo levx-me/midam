@@ -41,7 +41,7 @@ These ask you first, with a card saying why:
 - installing or changing the Mac (`sudo`, `brew install`, global npm, `curl | sh`), a command that wants out of the sandbox, and changes to what runs on its own next time: `.claude/`, `.mcp.json`, `.git/`
 - connected services that change something, and anything mentioning Stripe, billing or payment
 
-The sandbox also forbids commands to leave it, and neither commands nor file tools can read `~/.ssh`, `~/.aws`, `~/.gnupg` or `~/Library/Keychains`. The rules read the command text; the sandbox is what holds.
+Commands may listen on localhost (`sandbox.network.allowLocalBinding`), so an agent can start a dev server that opens in a preview tab. The sandbox also forbids commands to leave it, and neither commands nor file tools can read `~/.ssh`, `~/.aws`, `~/.gnupg` or `~/Library/Keychains`. The rules read the command text; the sandbox is what holds.
 
 ## Install
 

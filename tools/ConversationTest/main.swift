@@ -328,6 +328,7 @@ do {
     let sandbox = s["sandbox"] as? [String: Any] ?? [:]
     check(sandbox["enabled"] as? Bool == true, "sandbox enabled")
     check(sandbox["allowUnsandboxedCommands"] as? Bool == false, "no command leaves the sandbox")
+    check((sandbox["network"] as? [String: Any])?["allowLocalBinding"] as? Bool == true, "a command can start a local dev server")
     check(((sandbox["filesystem"] as? [String: Any])?["denyRead"] as? [String])?.contains("~/.ssh") == true, "commands can't read keys")
     check(((s["permissions"] as? [String: Any])?["deny"] as? [String])?.contains("Read(~/.ssh/**)") == true, "file tools can't read keys")
     let hook = (((s["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String ?? ""

@@ -237,6 +237,7 @@ final class Conversation: ObservableObject {
 
     /// The sandbox keeps writes inside the project (D14), with no way out of it for a command
     /// (allowUnsandboxedCommands) and the usual secrets unreadable to commands and file tools;
+    /// a command may listen on localhost (allowLocalBinding, D23) so an agent can start a dev server;
     /// the PreToolUse hook answers "ask" for every tool so each use reaches Midam over stdio
     /// (can_use_tool), even ones the person's own settings or hooks would allow. Passed with
     /// --settings, which adds to the person's settings.
@@ -245,7 +246,7 @@ final class Conversation: ObservableObject {
         let secrets = ["~/.ssh", "~/.aws", "~/.gnupg", "~/Library/Keychains"]
         let s: [String: Any] = [
             "sandbox": ["enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false,
-                        "filesystem": ["denyRead": secrets]],
+                        "network": ["allowLocalBinding": true], "filesystem": ["denyRead": secrets]],
             "permissions": ["deny": secrets.map { "Read(\($0)/**)" }],
             "hooks": ["PreToolUse": [["matcher": "*", "hooks": [["type": "command", "command": "echo " + LoginShell.quote(ask)]]]]],
         ]
