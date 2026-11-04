@@ -734,6 +734,7 @@ struct NewAgentSheet: View {
             do {
                 let project = try await store.host.createProject(name: name)
                 dismiss()
+                SidebarState.shared.reveal = [project] // listed already: selected and scrolled to
                 store.openAgent(project: project, resume: nil)
             } catch ProjectError.exists {
                 nameError = "A project with that name already exists."

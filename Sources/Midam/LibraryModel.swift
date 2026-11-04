@@ -177,10 +177,12 @@ import AppKit
     }
 
     /// Every registered project is listed, one with no documents yet (only agents) after the rest.
+    /// One whose folder is gone (deleted, drive away) is left out, and returns with its folder.
     private func recompute() {
-        var next = Library.projects(infos.filter { state.added.contains($0.project) }, state: state)
+        let present = state.added.filter { FileManager.default.fileExists(atPath: $0) }
+        var next = Library.projects(infos.filter { present.contains($0.project) }, state: state)
         let listed = Set(next.map(\.id))
-        next += state.added.subtracting(listed).sorted().map {
+        next += present.subtracting(listed).sorted().map {
             LibraryProject(id: $0, name: ($0 as NSString).lastPathComponent, parent: nil, groups: [], docCount: 0, unread: 0, lastModified: .distantPast)
         }
         if next != projects { projects = next }

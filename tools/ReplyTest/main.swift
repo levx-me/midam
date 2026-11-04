@@ -62,6 +62,10 @@ assert(r.markdown(path: "/p/a.md", words: en).hasPrefix("## a.md Review\n\n1. `p
 r = Reply(notes: [note(1, 1, "q", "  \n"), note(2, 2, "r", "t")])
 assert(r.markdown(path: "/p/a.md", words: en) == "## a.md Review\n\n1. `plan.md:L2`\n   > r\n   t\n")
 
+// Send needs words, a summary or a verdict: empty notes alone are nothing to send.
+assert(!Reply().canSend && !Reply(notes: [note(1, 1, "q", " \n")], summary: "  ").canSend)
+assert(Reply(notes: [note(1, 1, "q", "t")]).canSend && Reply(summary: "s").canSend && Reply(verdict: .approve).canSend)
+
 // Multi-line quote and text keep their lines, indented; blank quote lines stay a bare ">".
 r = Reply(notes: [note(3, 6, "line one\n\nline three", "why\nbecause")], verdict: .changes)
 assert(r.markdown(path: "/p/a.md", words: en) == """

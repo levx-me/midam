@@ -815,7 +815,7 @@ final class PageWebView: WKWebView {
     /// Send (⌘↩): to the agent waiting in `midam review --wait`, else (or if it stopped waiting)
     /// to the clipboard. The draft clears either way; the document is never touched.
     func sendReply() {
-        guard reply != Reply(), fileURL != nil else {
+        guard reply.canSend, fileURL != nil else {
             return AccessibilityNotification.Announcement(String(localized: "Nothing to send yet")).post()
         }
         let markdown = replyMarkdown

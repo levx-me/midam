@@ -116,7 +116,7 @@ struct ReplyTab: View {
                 Spacer()
                 Button { page.sendReply() } label: { waiting ? Text("Send to Agent") : Text("Send") }
                     .primaryButton()
-                    .disabled(empty)
+                    .disabled(!page.reply.canSend)
                     .help(Text(verbatim: KeyboardShortcut.sendReply.glyph))
             }
         }

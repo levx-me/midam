@@ -513,27 +513,9 @@ struct Sidebar: View {
         .onChange(of: store.selected, initial: true) { syncSelection() }
         .onChange(of: library.projects) {
             if state.selection == nil { syncSelection() } // keeps a row arrowed to
-            // An added root may sit inside a repository the sidebar lists by its own root.
-            let near = { (root: String, p: LibraryProject) in p.id == root || root.hasPrefix(p.id + "/") || p.id.hasPrefix(root + "/") }
-            if let project = state.reveal.lazy.compactMap({ root in library.projects.first { near(root, $0) } }).first {
-                state.reveal = []
-                let item = SidebarItem.project(project.id)
-                // The list takes a selection only once its rows exist: set it on the next turn,
-                // then scroll to it as soon as the outline shows it selected.
-                DispatchQueue.main.async { state.scrollTarget = item; state.selection = item }
-                func scroll(_ tries: Int) {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        guard let w = NSApp.mainWindow ?? NSApp.windows.first(where: { Sidebar.find(NSOutlineView.self, in: $0.contentView) != nil }),
-                              let outline = Sidebar.find(NSOutlineView.self, in: w.contentView) else { return }
-                        if state.selection != item { state.selection = item }
-                        guard let r = outline.selectedRowIndexes.first else { if tries < 12 { scroll(tries + 1) }; return }
-                        w.makeFirstResponder(outline)
-                        outline.scrollRowToVisible(r)
-                    }
-                }
-                scroll(0)
-            }
+            revealPending()
         }
+        .onChange(of: store.project) { revealPending() } // a project made by New Project is listed already
         .accessibilityLabel("Documents")
         .onChange(of: state.scrollTarget) { _, target in
             guard let target else { return }
@@ -598,6 +580,30 @@ struct Sidebar: View {
             for g in p.groups { if let d = g.docs.first(where: { $0.id == id }) { return (p, d) } }
         }
         return nil
+    }
+
+    /// Selects and scrolls to the project just registered (`state.reveal`), once it is listed.
+    private func revealPending() {
+        // An added root may sit inside a repository the sidebar lists by its own root.
+        let near = { (root: String, p: LibraryProject) in p.id == root || root.hasPrefix(p.id + "/") || p.id.hasPrefix(root + "/") }
+        if let project = state.reveal.lazy.compactMap({ root in library.projects.first { near(root, $0) } }).first {
+            state.reveal = []
+            let item = SidebarItem.project(project.id)
+            // The list takes a selection only once its rows exist: set it on the next turn,
+            // then scroll to it as soon as the outline shows it selected.
+            DispatchQueue.main.async { state.scrollTarget = item; state.selection = item }
+            func scroll(_ tries: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    guard let w = NSApp.mainWindow ?? NSApp.windows.first(where: { Sidebar.find(NSOutlineView.self, in: $0.contentView) != nil }),
+                          let outline = Sidebar.find(NSOutlineView.self, in: w.contentView) else { return }
+                    if state.selection != item { state.selection = item }
+                    guard let r = outline.selectedRowIndexes.first else { if tries < 12 { scroll(tries + 1) }; return }
+                    w.makeFirstResponder(outline)
+                    outline.scrollRowToVisible(r)
+                }
+            }
+            scroll(0)
+        }
     }
 
     private func syncSelection() {
@@ -1006,7 +1012,7 @@ private struct ProjectRow: View {
             .contentShape(Rectangle())
             // ⋯ sits beside the unread dot (never in its place), in the row's quiet grey: the
             // accent tint a menu label gets by default read as a second badge.
-            if hovering {
+            if hovering || state.selection == .project(project.id) {
                 Menu { ProjectMenu(id: project.id) } label: { MoreGlyph() }
                     .menuStyle(.button)
                     .buttonStyle(.plain)
@@ -1026,6 +1032,7 @@ private struct ProjectRow: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onDisappear { hovering = false } // a recycled row must not keep the last pointer
         .draggable(drag()) // app-internal, Finder takes nothing
         .pinDrop(onto: project.id, if: pinnedRows != nil, targeted: $targeted) // All Projects sorts itself
         .accessibilityElement(children: .ignore)

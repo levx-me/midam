@@ -68,7 +68,7 @@ struct MidamApp: App {
             Divider()
             // m stands down while a text field has focus (Store.singleKeyBypass), so it types there.
             Button("Add Note") { page?.addNote() }.keyboardShortcut(.addNote).disabled(page == nil || store.findFocused)
-            Button("Send Reply") { page?.sendReply() }.keyboardShortcut(.sendReply).disabled(page == nil)
+            Button("Send Reply") { page?.sendReply() }.keyboardShortcut(.sendReply).disabled(page?.reply.canSend != true)
         }
         CommandGroup(before: .toolbar) {
             // ⇧⌘L as in Safari, ⌃⌘S as macOS's sidebars.

@@ -32,6 +32,12 @@ struct Reply: Codable, Equatable {
 
     static let quoteLimit = 200
 
+    /// Something to say: a verdict, a summary, or a note with words (empty notes stay out of the reply).
+    var canSend: Bool {
+        func has(_ s: String) -> Bool { !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return verdict != nil || has(summary) || notes.contains { has($0.text) }
+    }
+
     /// `path` relative to `root` when it lies inside it, else just the file name.
     static func display(_ path: String, root: String?) -> String {
         if let root, !root.isEmpty {
