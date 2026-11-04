@@ -550,6 +550,7 @@ struct AgentTabButton: View {
             .focusable(false)
             .accessibilityHidden(true)
         }
+        .shortcutHint(keys: store.tabKeys(tab.id), shown: store.shortcutHintsVisible)
         .onHover { hover = $0 }
     }
 }

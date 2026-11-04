@@ -78,6 +78,20 @@ struct Shortcut {
     init(_ action: LocalizedStringKey, gesture: LocalizedStringKey) { self.action = action; keys = []; self.gesture = gesture }
 }
 
+/// The rows a shortcut hint (hold ⌘) shows too, so the hint and the help read the same words and keys.
+@MainActor extension Shortcut {
+    static let newAgent = Shortcut("New Agent…", .newAgent)
+    static let sidebar = Shortcut("Show · hide sidebar", .sidebarSafari, .sidebar)
+    static let unread = Shortcut("Show Only Unread", .unreadOnly)
+    static let panel = Shortcut("Show · hide panel", .panel)
+    static let source = Shortcut("Reading ↔ Source", .switchView)
+    static let contents = Shortcut("Toggle Table of Contents", .tableOfContents)
+    static let backForward = Shortcut("Back · forward", .back, .forward)
+    static let find = Shortcut("Find", .find, .findSlash)
+    static let searchSidebar = Shortcut("Search the sidebar (list focused)", .find)
+    static let help = Shortcut("Keyboard Shortcuts", .shortcuts)
+}
+
 struct ShortcutGroup {
     let title: LocalizedStringKey
     let items: [Shortcut]
@@ -88,6 +102,7 @@ struct ShortcutGroup {
     static let groups: [ShortcutGroup] = [
         ShortcutGroup("Documents & Tabs", [
             Shortcut("Open a document", .open),
+            .newAgent,
             Shortcut("New tab from the sidebar · back to the page", .newTab),
             Shortcut("Close Tab", .closeTab, .closeTabX),
             Shortcut("Tab 1–8 · last tab", text: "⌘1–8", KeyboardShortcut.lastTab.glyph),
@@ -96,7 +111,7 @@ struct ShortcutGroup {
             Shortcut("Show in Finder", .showInFinder),
         ]),
         ShortcutGroup("Navigate", [
-            Shortcut("Back · forward", .back, .forward),
+            .backForward,
             Shortcut("Back · forward", gesture: "Two-finger swipe"),
             Shortcut("Page down · up", .pageDown, .pageUp),
             Shortcut("Bottom · top", .bottom, .top),
@@ -107,18 +122,18 @@ struct ShortcutGroup {
             Shortcut("Next · previous change", .nextChange, .previousChange),
         ]),
         ShortcutGroup("View", [
-            Shortcut("Show · hide sidebar", .sidebarSafari, .sidebar),
-            Shortcut("Show Only Unread", .unreadOnly),
-            Shortcut("Show · hide panel", .panel),
-            Shortcut("Reading ↔ Source", .switchView),
-            Shortcut("Toggle Table of Contents", .tableOfContents),
+            .sidebar,
+            .unread,
+            .panel,
+            .source,
+            .contents,
             Shortcut("Immersive Mode", .immersive),
             Shortcut("Reload", .reload),
             Shortcut("Full screen", text: "⌃⌘F", "fn F"), // PageWebView and the system
         ]),
         ShortcutGroup("Find & Text", [
-            Shortcut("Find", .find, .findSlash),
-            Shortcut("Search the sidebar (list focused)", .find),
+            .find,
+            .searchSidebar,
             Shortcut("Next · previous match", .findNext, .findPrevious),
             Shortcut("Bigger · smaller · default size", .bigger, .smaller, .defaultSize),
         ]),
@@ -127,7 +142,7 @@ struct ShortcutGroup {
             Shortcut("Send Reply", .sendReply),
         ]),
         ShortcutGroup("Settings", [
-            Shortcut("Keyboard Shortcuts", .shortcuts),
+            .help,
             Shortcut("Settings…", text: "⌘,"), // the system's Settings item
         ]),
     ]
@@ -189,5 +204,72 @@ private struct KeyCap: View {
             .frame(minWidth: 22, minHeight: 20)
             .background(Color.primary.opacity(0.06), in: cap)
             .overlay(cap.strokeBorder(Color(nsColor: .hairline), lineWidth: 1))
+    }
+}
+
+/// While ⌘ alone is held (Store.shortcutHintsVisible): what an element's keys do, in a small
+/// solid badge (ink on paper inverted, never glass on glass) laid over the window, so nothing
+/// moves. A row per shortcut: its words and keys from Shortcuts.swift, as the help shows them.
+/// VoiceOver already reads the keys as each control's hint, so the badge stays out of its way.
+private struct ShortcutHint: ViewModifier {
+    let rows: [Shortcut]
+    var keys: String?
+    let shown: Bool
+    let alignment: Alignment
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: alignment) {
+            badge
+                .fixedSize()
+                // Below the element (6 pt clear of it); a keys-only badge sits inside it, as Safari's ⌘1.
+                .alignmentGuide(VerticalAlignment.bottom) { keys == nil ? $0[.top] - 6 : $0[.bottom] }
+                .opacity(shown ? 1 : 0)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: shown)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder private var badge: some View {
+        let ink = Color(nsColor: .paper), ground = Color(nsColor: .ink)
+        if let keys {
+            Text(verbatim: keys)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(ink)
+                .padding(.horizontal, 6)
+                .frame(minHeight: 18)
+                .background(ground, in: Capsule())
+                .padding(.trailing, 3) // where the × shows on hover
+        } else {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                ForEach(rows.indices, id: \.self) { i in
+                    GridRow {
+                        Text(rows[i].action).font(.system(size: 11.5))
+                        Text(verbatim: rows[i].keys.joined(separator: "  "))
+                            .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                            .gridColumnAlignment(.trailing)
+                    }
+                }
+            }
+            .foregroundStyle(ink)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(ground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+        }
+    }
+}
+
+extension View {
+    /// A badge of `rows` below this view while `shown`; `alignment` .bottomLeading, .bottom or
+    /// .bottomTrailing picks which edge it hangs from.
+    func shortcutHint(_ rows: [Shortcut], shown: Bool, alignment: Alignment = .bottom) -> some View {
+        modifier(ShortcutHint(rows: rows, shown: shown, alignment: alignment))
+    }
+
+    /// Only the keys, inside this view at its trailing end: a tab's ⌘1.
+    func shortcutHint(keys: String?, shown: Bool) -> some View {
+        modifier(ShortcutHint(rows: [], keys: keys, shown: shown && keys != nil, alignment: .trailing))
     }
 }

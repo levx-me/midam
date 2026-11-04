@@ -386,9 +386,11 @@ struct Sidebar: View {
                         }
                     }
                     .frame(height: TitleStrip.capsule)
+                    .shortcutHint([.sidebar, .unread, .newAgent], shown: store.shortcutHintsVisible, alignment: .bottomTrailing)
                     .padding(.top, store.rowTop)
                     .padding(.trailing, 10)
                 }
+                .zIndex(1) // the hints' badge hangs over the list
             if state.searching {
                 SidebarSearchField(state: state, toList: { focusList(firstOf: shown) }, closed: { focusList(firstOf: []) })
                     .padding(.horizontal, 10)

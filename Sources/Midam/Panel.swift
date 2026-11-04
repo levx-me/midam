@@ -147,7 +147,7 @@ private struct PanelTabs: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(PanelTab.allCases, id: \.self) { tab in
-                PanelTabButton(tab: tab, on: store.panelTab == tab) {
+                PanelTabButton(tab: tab, on: store.panelTab == tab, hint: store.shortcutHintsVisible) {
                     store.panelTab = tab
                     if tab == .find { store.current?.page.focusField() }
                 }
@@ -161,6 +161,7 @@ private struct PanelTabs: View {
 private struct PanelTabButton: View {
     let tab: PanelTab
     let on: Bool
+    let hint: Bool
     let action: () -> Void
     @State private var hover = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -176,6 +177,7 @@ private struct PanelTabButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .shortcutHint(keys: tab.keys.first?.glyph, shown: hint)
         .onHover { hover = $0 }
         .accessibilityLabel(tab.title)
         .accessibilityHint(Text(verbatim: glyphs))

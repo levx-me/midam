@@ -113,6 +113,10 @@ import UserNotifications
     }
     private static let sidebarKey = "sidebarOpen"
     private var keyMonitor: Any?
+    /// ⌘ alone held for half a second: every control shows its keys (View.shortcutHint). A quick
+    /// ⌘-shortcut never shows them: its key cancels the wait.
+    @Published private(set) var shortcutHintsVisible = false
+    private var hintWait: Task<Void, Never>?
     /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, n N, m (note), / (find), x (close tab).
     private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .lineDown, .lineUp, .vimTop, .vimBottom,
                                          .halfPageDown, .halfPageUp, .halfPageUpE, .vimPageDown, .vimPageUp,
@@ -317,6 +321,13 @@ import UserNotifications
         window?.representedURL = file.url
         save()
         LibraryModel.shared.opened(file.url) // shown is read (D5)
+    }
+
+    /// The keys that select tab `id`, as Safari's: ⌘1…⌘8 by position, ⌘9 the last.
+    func tabKeys(_ id: UUID) -> String? {
+        let ids = order
+        guard let i = ids.firstIndex(of: id) else { return nil }
+        return i < 8 ? KeyboardShortcut.tab(i + 1).glyph : i == ids.count - 1 ? KeyboardShortcut.lastTab.glyph : nil
     }
 
     /// Selects tab `n` (1-based), or the last tab for nil.
@@ -648,10 +659,42 @@ import UserNotifications
         window = w
         measureLights()
         // Events pass on untouched, except a single key that must not reach the menu (singleKeyBypass).
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated { self?.singleKeyBypass(event) ?? false } ? nil : event
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.hintKeys(event)
+                return event.type == .keyDown && self?.singleKeyBypass(event) == true
+            } ? nil : event
+        }
+        // Hints go when the app or the window stops being the one typed into.
+        for name in [NSApplication.didResignActiveNotification, NSWindow.didResignKeyNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: name == NSWindow.didResignKeyNotification ? w : nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hideHints() }
+            })
         }
         return w
+    }
+
+    /// ⌘ pressed alone starts the half-second wait for the hints; any key, another modifier or
+    /// ⌘'s release ends it and hides them.
+    private func hintKeys(_ event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
+        if event.type == .flagsChanged, mods == .command {
+            guard hintWait == nil, !shortcutHintsVisible else { return }
+            hintWait = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                self?.hintWait = nil
+                self?.shortcutHintsVisible = true
+            }
+        } else {
+            hideHints()
+        }
+    }
+
+    private func hideHints() {
+        hintWait?.cancel()
+        hintWait = nil
+        if shortcutHintsVisible { shortcutHintsVisible = false }
     }
 
     /// AppKit offers every key to the menu before the focused view, so the Go menu's single keys
@@ -883,6 +926,11 @@ struct ReaderView: View {
             PanelToggle(store: store)
                 .frame(width: TitleStrip.capsule, height: TitleStrip.capsule) // alone: a circle
                 .glassCapsule()
+                // Closed: the header's right end and the panel's tabs in one badge, over the page. Open: the
+                // badge would cover the panel's tab row, so each button and tab shows only its keys.
+                .shortcutHint((page == nil ? [] : [.source]) + [.panel, .find, .contents, .help],
+                              shown: store.shortcutHintsVisible && !store.panelOpen, alignment: .bottomTrailing)
+                .shortcutHint(keys: store.panelOpen ? KeyboardShortcut.panel.glyph : nil, shown: store.shortcutHintsVisible)
                 .padding(.top, store.rowTop)
                 .padding(.trailing, 10)
                 .opacity(store.immersive ? 0 : 1) // as the header's
@@ -955,24 +1003,28 @@ struct TitleStrip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if !store.sidebarOpen { // open: the toggle lives in the sidebar's top strip (SidebarButtons)
-                SidebarToggle(store: store)
-                    .frame(width: Self.capsule, height: Self.capsule) // alone: a circle
-                    .glassCapsule()
-                    .fixedSize()
-            }
-            HStack(spacing: 0) {
-                StripIcon(label: "Back", keys: [.back], enabled: store.history.canGoBack, action: { store.goBack() }) {
-                    Image(systemName: "chevron.left")
+            HStack(spacing: 8) {
+                if !store.sidebarOpen { // open: the toggle lives in the sidebar's top strip (SidebarButtons)
+                    SidebarToggle(store: store)
+                        .frame(width: Self.capsule, height: Self.capsule) // alone: a circle
+                        .glassCapsule()
+                        .fixedSize()
                 }
-                StripIcon(label: "Forward", keys: [.forward], enabled: store.history.canGoForward, action: { store.goForward() }) {
-                    Image(systemName: "chevron.right")
+                HStack(spacing: 0) {
+                    StripIcon(label: "Back", keys: [.back], enabled: store.history.canGoBack, action: { store.goBack() }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    StripIcon(label: "Forward", keys: [.forward], enabled: store.history.canGoForward, action: { store.goForward() }) {
+                        Image(systemName: "chevron.right")
+                    }
                 }
+                .padding(.horizontal, 4)
+                .frame(height: Self.capsule)
+                .glassCapsule()
+                .fixedSize()
             }
-            .padding(.horizontal, 4)
-            .frame(height: Self.capsule)
-            .glassCapsule()
-            .fixedSize()
+            // One badge for the cluster: side by side, the buttons' own would overlap.
+            .shortcutHint(store.sidebarOpen ? [.backForward] : [.sidebar, .backForward], shown: store.shortcutHintsVisible, alignment: .bottomLeading)
             if store.tabCount > 0 {
                 TabStrip(store: store)
                     .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
@@ -983,6 +1035,7 @@ struct TitleStrip: View {
                     .frame(width: Self.capsule, height: Self.capsule) // alone: a circle
                     .glassCapsule()
                     .fixedSize()
+                    .shortcutHint(keys: store.panelOpen ? KeyboardShortcut.switchView.glyph : nil, shown: store.shortcutHintsVisible)
             }
         }
         // Immersive mode: faded out and out of reach, but kept in place. The drag strip stays.
@@ -1163,6 +1216,7 @@ struct FileTab: View {
             .accessibilityHidden(true) // the tab's own Close Tab action, and ⌘W, cover it
             .fastTip(Text("Close Tab") + Text(verbatim: " (\(KeyboardShortcut.closeTab.glyph), \(KeyboardShortcut.closeTabX.glyph))"))
         }
+        .shortcutHint(keys: store.tabKeys(file.id), shown: store.shortcutHintsVisible)
         .onHover { hover = $0 }
     }
 }
