@@ -135,6 +135,9 @@ struct MidamApp: App {
                 go("Top", .top, .vimTop) // gg reads as g twice: still the top
                 go("Bottom", .bottom, .vimBottom)
             }
+            Divider()
+            Button("Next Change") { page?.stepChange(1) }.keyboardShortcut(.nextChange).disabled(page == nil || store.findFocused)
+            Button("Previous Change") { page?.stepChange(-1) }.keyboardShortcut(.previousChange).disabled(page == nil || store.findFocused)
         }
         CommandGroup(replacing: .help) {
             Button("Keyboard Shortcuts") { store.togglePanel(.shortcuts) }.keyboardShortcut(.shortcuts)

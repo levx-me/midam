@@ -102,10 +102,10 @@ import UniformTypeIdentifiers
     }
     private static let sidebarKey = "sidebarOpen"
     private var keyMonitor: Any?
-    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, / (find), x (close tab).
+    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, n N, / (find), x (close tab).
     private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .lineDown, .lineUp, .vimTop, .vimBottom,
                                          .halfPageDown, .halfPageUp, .halfPageUpE, .vimPageDown, .vimPageUp,
-                                         .findSlash, .closeTabX]
+                                         .findSlash, .closeTabX, .nextChange]
                                          .map { String($0.key.character).lowercased() })
     /// The find field has focus: single-key Go shortcuts (Space, j, k, g, G) stand down.
     @Published var findFocused = false
@@ -202,6 +202,7 @@ import UniformTypeIdentifiers
     /// place read so far in the history; closing a tab, restoring and back/forward do not.
     func select(_ file: OpenFile, record: Bool = true) {
         if record, file.id != selected, let here = here() { history.leave(here) }
+        if file.id != selected { current?.page.markRead() } // left: what it showed is now read (V3)
         file.shown = true
         Welcome.launchEmpty = false
         selected = file.id
@@ -226,6 +227,8 @@ import UniformTypeIdentifiers
     /// open, with the sidebar, as Mail does (D11).
     func close(_ file: OpenFile) {
         guard let i = files.firstIndex(where: { $0.id == file.id }) else { return }
+        if selected == file.id { file.page.markRead() }
+        SidebarChanges.shared.forget(file.url)
         files.remove(at: i)
         if files.isEmpty {
             selected = nil
@@ -424,6 +427,7 @@ import UniformTypeIdentifiers
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         history = NavHistory() // the places read went with the window
+        current?.page.markRead()
         if !quitting {
             files.removeAll() // stops every tab's watcher
             selected = nil
@@ -473,6 +477,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Store.shared.quitting = true // keep the open files for next launch
+        Store.shared.current?.page.markRead()
+        Baseline.queue.sync {} // its write lands before the app ends
         return .terminateNow
     }
 }
@@ -775,6 +781,7 @@ struct FileTab: View {
                     .font(.system(size: 14, weight: on ? .medium : .regular))
                     .foregroundStyle(GlassLabel.style(strong: on, opaque: reduceTransparency))
                     .lineLimit(1)
+                if file.page.changes > 0 { ChangeChip(n: file.page.changes) }
                 Color.clear.frame(width: 20, height: 20) // room for the ×
             }
             .padding(.leading, 11)
@@ -785,8 +792,8 @@ struct FileTab: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .fastTip(Text(verbatim: file.url.path + "\n") + position)
-        .accessibilityLabel(Text(verbatim: file.url.lastPathComponent))
+        .fastTip(Text(verbatim: file.url.path + "\n" + (file.page.changes > 0 ? Words.changes(file.page.changes) + "\n" : "")) + position)
+        .accessibilityLabel(Text(verbatim: file.page.changes > 0 ? file.url.lastPathComponent + ", " + Words.changes(file.page.changes) : file.url.lastPathComponent))
         .accessibilityHint(position)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityAction(named: Text("Close Tab")) { store.close(file) }

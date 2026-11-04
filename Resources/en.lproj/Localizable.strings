@@ -244,3 +244,15 @@
 "First %lld listed" = "First %lld listed";
 "Contents show in Reading view." = "Contents show in Reading view.";
 "This document has no headings." = "This document has no headings.";
+
+/* Changes since last read (V3) */
+"Deleted: {words}, {n}" = "Deleted: {words}, {n}";
+"1 line" = "1 line";
+"{n} lines" = "{n} lines";
+"1 change" = "1 change";
+"%lld changes" = "%lld changes";
+"No changes since last read" = "No changes since last read";
+"Change %lld of %lld" = "Change %lld of %lld";
+"Next · previous change" = "Next · previous change";
+"Next Change" = "Next Change";
+"Previous Change" = "Previous Change";

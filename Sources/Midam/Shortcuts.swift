@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Every key the menus bind, named once: the menus use these, and the shortcuts help shows them,
 /// so the two cannot drift. Keys handled outside the menus (⇧⌘[ ], ⌃⌘F, ⌘1-8) are listed as text.
-/// Bare keys (Space, j k g G d u e f b, /, x) are menu items too; Store.singleKeyBypass keeps
+/// Bare keys (Space, j k g G d u e f b, n N, /, x) are menu items too; Store.singleKeyBypass keeps
 /// them out of text fields and other windows.
 extension KeyboardShortcut {
     static let open = KeyboardShortcut("o")
@@ -42,6 +42,8 @@ extension KeyboardShortcut {
     static let halfPageUpE = KeyboardShortcut("e", modifiers: [])
     static let vimPageDown = KeyboardShortcut("f", modifiers: [])
     static let vimPageUp = KeyboardShortcut("b", modifiers: [])
+    static let nextChange = KeyboardShortcut("n", modifiers: []) // changes since last read, as Vim's next match
+    static let previousChange = KeyboardShortcut("n", modifiers: .shift)
     static let bigger = KeyboardShortcut("+")
     static let smaller = KeyboardShortcut("-")
     static let defaultSize = KeyboardShortcut("0")
@@ -98,6 +100,7 @@ struct ShortcutGroup {
             Shortcut("Half page down · up", .halfPageDown, .halfPageUp, .halfPageUpE),
             Shortcut("Page down · up", .vimPageDown, .vimPageUp),
             Shortcut("Bottom · top", .vimBottom, .vimTop),
+            Shortcut("Next · previous change", .nextChange, .previousChange),
         ]),
         ShortcutGroup("View", [
             Shortcut("Show · hide sidebar", .sidebarSafari, .sidebar),

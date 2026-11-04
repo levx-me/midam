@@ -21,6 +21,8 @@ let gfm = null, labels = {}, notes = new Map(), noteCount = 0;
 // What the document contains at all, so the start() scans below (run by marked for every token,
 // each over the rest of the text) are skipped outright when there is nothing to find.
 let has = {};
+// The document's blocks (see markBlocks) and the source line marked's text starts on.
+let blocks = [], firstLine = 1;
 
 // marked's block rules, tried at the start of the rest of the document for every block. The
 // system WebKit runs a pattern with a counted group, such as hr's (?:-[\t ]*){3,}, in its regex
@@ -39,19 +41,93 @@ function anchorBlockRules() {
 
 // Markdown to HTML. `words` holds the localised alert titles and footnote labels.
 function midamParse(src, words) {
+  labels = words && typeof words === "object" ? words : {};
+  const fm = begin(src);
+  const html = gfm.parse(fm ? fm.rest : src);
+  return (fm ? tag(fm.html, fm) : "") + html + footnoteSection();
+}
+
+// Resets the per-document state for `src` and returns its front matter, or null.
+function begin(src) {
   if (!gfm) anchorBlockRules();
   gfm ||= new marked.Marked({ gfm: true }, {
     extensions: [mathBlock, footnoteDef, mathInline, footnoteRef, emoji],
-    renderer: { code: mathFence, blockquote: alertBox },
-    hooks: { processAllTokens: markAlerts },
+    renderer: { code: mathFence, blockquote: alertBox, listitem: sourceItem },
+    hooks: { processAllTokens: tokens => markAlerts(markBlocks(tokens)), provideParser: block => block && parseBlocks },
   });
-  labels = words && typeof words === "object" ? words : {};
   notes = new Map();
   noteCount = 0;
   has = { note: src.includes("[^"), dollars: src.includes("$$"), dollar: src.includes("$"), colon: /:[a-z0-9_+-]+:/.test(src) };
   const fm = frontMatter(src);
-  const html = gfm.parse(fm ? fm.rest : src);
-  return (fm ? fm.html : "") + html + footnoteSection();
+  blocks = [];
+  firstLine = fm ? addBlock(fm, "frontMatter", fm.raw, span(fm.raw, 1)).next : 1;
+  return fm;
+}
+
+// MARK: Source lines. Every top-level block element gets data-src="<first>-<last>" (1-based lines
+// of the whole file, front matter included) and data-blk="<n>", its index in `blocks`: the flat
+// list changes.js diffs. Lists are split into their items, nested ones too (the ul/ol itself gets
+// data-src only); an item's diff text is its own, without its marker or nested lists. Link and
+// footnote definitions (a used note's li gets data-src) and HTML that does not start with an
+// element draw nothing in place, so they are no block. marked's raws add up to its text (CRLF
+// made LF), so lines are counted along them.
+
+const newlines = s => s.split("\n").length - 1;
+
+// The lines of `raw` starting on `line`, without the blank lines around it, and the line after it.
+function span(raw, line) {
+  return { start: line + newlines(/^(?:[ \t]*\n)*/.exec(raw)[0]), end: line + newlines(raw.trimEnd()), next: line + newlines(raw) };
+}
+
+function addBlock(t, kind, raw, s) {
+  t.midamSrc = s.start + "-" + s.end;
+  t.midamBlk = blocks.length;
+  blocks.push({ kind, raw, start: s.start, end: s.end });
+  return s;
+}
+
+function markBlocks(tokens) {
+  let line = firstLine;
+  for (const t of tokens) {
+    const s = span(t.raw, line);
+    line = s.next;
+    if (t.type === "list" || t.type === "footnoteDef") t.midamSrc = s.start + "-" + s.end;
+    if (t.type === "list") markItems(t, s.start);
+    else if (!["space", "def", "footnoteDef"].includes(t.type) && (t.type !== "html" || /^<[a-z]/i.test(t.raw))) addBlock(t, t.type, t.raw, s);
+  }
+  return tokens;
+}
+
+function markItems(list, line) {
+  for (const it of list.items) {
+    const s = span(it.raw, line), own = [];
+    line = s.next;
+    addBlock(it, "item", "", s);
+    const b = blocks[it.midamBlk];
+    let l = s.start; // an item's tokens start on its marker line
+    for (const c of it.tokens) {
+      if (c.type === "list") markItems(c, span(c.raw, l).start);
+      else own.push(c.raw);
+      l += newlines(c.raw);
+    }
+    b.raw = own.join("");
+  }
+}
+
+// marked's block parser, one top-level token at a time so each one's HTML can be tagged.
+function parseBlocks(tokens, options) {
+  const p = new marked.Parser(options);
+  return tokens.map(t => tag(p.parse([t]), t)).join("");
+}
+
+// marked's own <li>, tagged.
+function sourceItem(it) {
+  return it.midamSrc ? tag("<li>", it) + this.parser.parse(it.tokens) + "</li>\n" : false;
+}
+
+// Adds a token's data-src and data-blk to the first tag of its HTML (none if it starts otherwise).
+function tag(html, t) {
+  return t.midamSrc ? html.replace(/^<[a-z][\w-]*/i, m => m + ' data-src="' + t.midamSrc + '"' + (t.midamBlk === undefined ? "" : ' data-blk="' + t.midamBlk + '"')) : html;
 }
 
 // Where a block extension interrupts the paragraph in hand: just after the \n of the first line
@@ -119,7 +195,10 @@ const footnoteDef = {
   },
   renderer(t) {
     const note = notes.get(t.label);
-    if (note && !note.html) note.html = this.parser.parse(t.tokens);
+    if (note && !note.html) {
+      note.html = this.parser.parse(t.tokens);
+      note.src = t.midamSrc;
+    }
     return "";
   },
 };
@@ -146,7 +225,7 @@ function footnoteSection() {
         word("back", "Back to reference") + " " + n.n + (r > 1 ? "-" + r : "") + '">↩︎' + (r > 1 ? "<sup>" + r + "</sup>" : "") + "</a>";
     }
     const body = n.html.trimEnd();
-    return '<li id="midam-fn-' + n.n + '">' + (/<\/p>$/.test(body) ? body.slice(0, -4) + back + "</p>" : body + back) + "</li>";
+    return '<li id="midam-fn-' + n.n + '"' + (n.src ? ' data-src="' + n.src + '"' : "") + ">" + (/<\/p>$/.test(body) ? body.slice(0, -4) + back + "</p>" : body + back) + "</li>";
   });
   return '<section class="footnotes"><h2 class="footnotes-title" id="midam-footnote-label">' + word("footnotes", "Footnotes") + "</h2>\n<ol>\n" + items.join("\n") + "\n</ol>\n</section>\n";
 }
@@ -228,13 +307,13 @@ function frontMatter(src) {
       value = /["'[\]{}]/.test(inner) ? [null] : inner.split(",").map(scalar).filter(s => s !== "");
     } else if (value) value = scalar(value);
     if (value === null || (Array.isArray(value) && value.includes(null))) {
-      return { html: '<pre class="front-matter"><code class="language-yaml">' + escapeHTML(m[1]) + "</code></pre>\n", rest };
+      return { html: '<pre class="front-matter"><code class="language-yaml">' + escapeHTML(m[1]) + "</code></pre>\n", rest, raw: m[0] };
     }
     rows.push("<tr><th scope=\"row\">" + escapeHTML(kv[1]) + "</th><td>" + (Array.isArray(value)
       ? value.map(v => '<span class="fm-item">' + escapeHTML(v) + "</span>").join(" ")
       : escapeHTML(value)) + "</td></tr>");
   }
-  return { html: '<table class="front-matter">\n<tbody>\n' + rows.join("\n") + "\n</tbody>\n</table>\n", rest };
+  return { html: '<table class="front-matter">\n<tbody>\n' + rows.join("\n") + "\n</tbody>\n</table>\n", rest, raw: m[0] };
 }
 
 // One YAML scalar as text, or null when it needs a real YAML parser.

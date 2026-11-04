@@ -2,8 +2,10 @@
 // light/dark image rule (#gh-dark-mode-only / #gh-light-mode-only in Resources/style.css).
 // Run: node tools/front-matter-test.js
 const fs = require("fs"), path = require("path"), R = path.join(__dirname, "../Resources/");
-const parse = new Function("marked", "katex", fs.readFileSync(R + "emoji.js", "utf8") + fs.readFileSync(R + "markdown.js", "utf8") +
+const midamParse = new Function("marked", "katex", fs.readFileSync(R + "emoji.js", "utf8") + fs.readFileSync(R + "markdown.js", "utf8") +
   "\nreturn midamParse;")(require(R + "marked.umd.js"), require(R + "katex.min.js"));
+// Source positions (data-src, data-blk) are checked by tools/changes-test.js.
+const parse = (md, words) => midamParse(md, words).replace(/ data-(?:src|blk)="[^"]*"/g, "");
 let bad = 0, n = 0;
 const check = (name, ok, out) => { n++; if (!ok) { bad++; console.log("FAIL", name, "\n" + out); } };
 const has = (md, ...want) => { const h = parse(md, {}); check(JSON.stringify(md), want.every(w => h.includes(w)), h); return h; };

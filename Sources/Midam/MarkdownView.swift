@@ -46,7 +46,7 @@ struct MarkdownView: NSViewRepresentable {
 
     private static let renderer = WKUserScript(
         source: [resource("marked.umd", "js"), resource("highlight.min", "js"), resource("katex.min", "js"),
-                 resource("emoji", "js"), resource("markdown", "js"), resource("render", "js")].joined(separator: "\n;\n"),
+                 resource("emoji", "js"), resource("markdown", "js"), resource("changes", "js"), resource("render", "js")].joined(separator: "\n;\n"),
         injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world)
 
     /// Mermaid (about 5 MB), evaluated in the app's world only when a document has a diagram.
@@ -59,6 +59,7 @@ struct MarkdownView: NSViewRepresentable {
         "warning": String(localized: "Warning"), "caution": String(localized: "Caution"),
         "footnotes": String(localized: "Footnotes"), "back": String(localized: "Back to reference"),
         "diagram": String(localized: "Diagram could not be drawn"),
+        "deleted": String(localized: "Deleted: {words}, {n}"), "line": String(localized: "1 line"), "lines": String(localized: "{n} lines"),
     ]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -87,6 +88,7 @@ struct MarkdownView: NSViewRepresentable {
         page.webView = webView
         page.fileURL = fileURL
         page.reload = { [weak c] in c?.reload(force: true) }
+        page.baseline = fileURL.flatMap { Baseline.read($0) } // the version last read: changes are marked against it
         c.watch()
         // Rendered once SwiftUI has put it in the window (a detached web view is throttled); a spare
         // still loading sends its didFinish to the coordinator.
@@ -171,10 +173,11 @@ struct MarkdownView: NSViewRepresentable {
             let offset = pendingOffset ?? fileURL.flatMap { Self.pendingOffsets.removeValue(forKey: $0.standardizedFileURL) }
             let cacheKey = cacheKey() // the file as this render reads it
             let started = ContinuousClock.now
+            page?.shown = text
             // Markdown is passed as an argument, never spliced into JS source.
-            webView.callAsyncJavaScript("return await midamRender(md, base, words)",
+            webView.callAsyncJavaScript("return await midamRender(md, base, words, baseline)",
                                        arguments: ["md": text, "base": fileURL?.deletingLastPathComponent().absoluteString ?? "",
-                                                   "words": MarkdownView.words],
+                                                   "words": MarkdownView.words, "baseline": page?.baseline ?? NSNull()],
                                        in: nil, in: world) { [weak self] result in
                 if case .failure(let error) = result { NSLog("Midam render failed: \(error)") }
                 // A re-render with a diagram: the page on screen stays until mermaid is loaded, then
@@ -195,6 +198,7 @@ struct MarkdownView: NSViewRepresentable {
                 }
                 if case .success(let value) = result {
                     self?.page?.takeOutline(value)
+                    self?.page?.takeChanges(value)
                     let r = value as? [String: Any]
                     if let cacheKey, let html = r?["html"] as? String { self?.saveCache(cacheKey, html) }
                     if r?["diagrams"] as? Bool == true { self?.drawDiagrams(cacheKey) }
@@ -274,11 +278,13 @@ struct MarkdownView: NSViewRepresentable {
 
         private func showCached(_ html: String) {
             guard let webView else { return }
-            webView.callAsyncJavaScript("return midamShowCached(html, base)",
-                                       arguments: ["html": html, "base": fileURL?.deletingLastPathComponent().absoluteString ?? ""],
+            page?.shown = text
+            webView.callAsyncJavaScript("return midamShowCached(html, base, md, baseline, words)",
+                                       arguments: ["html": html, "base": fileURL?.deletingLastPathComponent().absoluteString ?? "",
+                                                   "md": text, "baseline": page?.baseline ?? NSNull(), "words": MarkdownView.words],
                                        in: nil, in: world) { [weak self] result in
                 if case .failure(let error) = result { NSLog("Midam cached page failed: \(error)") }
-                if case .success(let value) = result { self?.page?.takeOutline(value) }
+                if case .success(let value) = result { self?.page?.takeOutline(value); self?.page?.takeChanges(value) }
             }
         }
 
@@ -640,9 +646,14 @@ final class PageWebView: WKWebView {
     /// The table of contents: h1-h3 from the last render, and the anchor of the section being read.
     var outline: [Heading] = []
     var tocCurrent: String?
+    /// Places changed since the version last read (V3), from the last render; 0 with no baseline.
+    var changes = 0 { didSet { if let fileURL { SidebarChanges.shared.set(fileURL, changes) } } }
     @ObservationIgnored weak var webView: WKWebView?
     @ObservationIgnored var fileURL: URL?
     @ObservationIgnored var reload: (() -> Void)?
+    /// The version last read (nil: never read) and the text on screen now, which becomes it on leaving.
+    @ObservationIgnored var baseline: String?
+    @ObservationIgnored var shown: String?
 
     /// ⌘F, /: the panel on its find tab, the field focused.
     func show() {
@@ -728,6 +739,29 @@ final class PageWebView: WKWebView {
     /// An id from the page, taken only if the outline holds it (at most 512 UTF-16 units); else nil.
     func tocAnchor(_ value: Any?) -> String? {
         Heading.anchor(value, in: outline)
+    }
+
+    func takeChanges(_ value: Any?) {
+        if let n = (value as? [String: Any])?["changes"] as? Int { changes = n }
+    }
+
+    /// The reader leaves this document (another tab, closed, window closed, quit): what it showed
+    /// becomes the version last read, and its marks go.
+    func markRead() {
+        guard let fileURL, let shown, shown != baseline else { return }
+        baseline = shown
+        Baseline.write(fileURL, text: shown)
+        webView?.callAsyncJavaScript("return midamMarks(b)", arguments: ["b": shown], in: nil, in: world) { _ in }
+        changes = 0
+    }
+
+    /// n / N: the next or previous change, announced.
+    func stepChange(_ d: Int) {
+        webView?.callAsyncJavaScript("return midamChangeStep(d)", arguments: ["d": d], in: nil, in: world) { result in
+            guard case .success(let value) = result, let r = value as? [String: Any],
+                  let i = r["index"] as? Int, let n = r["count"] as? Int else { return }
+            AccessibilityNotification.Announcement(n == 0 ? String(localized: "No changes since last read") : String(format: String(localized: "Change %lld of %lld"), i, n)).post()
+        }
     }
 
     func setView(source: Bool) {

@@ -220,6 +220,11 @@ enum SidebarItem: Hashable {
 
     static func unread(_ n: Int) -> String { String(format: String(localized: "%lld unread"), n) }
 
+    /// Places changed since the version last read (V3).
+    static func changes(_ n: Int) -> String {
+        n == 1 ? String(localized: "1 change") : String(format: String(localized: "%lld changes"), n)
+    }
+
     static func claudeProjects(_ n: Int) -> String {
         n == 1 ? String(localized: "1 Claude Code project") : String(format: String(localized: "%lld Claude Code projects"), n)
     }
@@ -1099,6 +1104,7 @@ private struct DocRow: View {
                     Text(match?.title == true ? Words.marked(doc.title, query) : AttributedString(doc.title))
                         .lineLimit(1)
                         .foregroundStyle(doc.deleted ? .secondary : .primary)
+                    if let n = changes, n > 0 { ChangeChip(n: n) }
                     if let lang = doc.langLabel {
                         Text(verbatim: lang)
                             .font(.system(size: 9, weight: .semibold))
@@ -1143,6 +1149,7 @@ private struct DocRow: View {
     }
 
     private var fileName: String { (doc.id as NSString).lastPathComponent }
+    private var changes: Int? { doc.deleted ? nil : SidebarChanges.shared.count(url, modified: doc.modified) }
 
     private func drag() -> URL {
         state.draggingProject = nil
@@ -1156,12 +1163,62 @@ private struct DocRow: View {
     private var label: String {
         var parts = [doc.title]
         if doc.deleted { parts.append(String(localized: "Deleted")) } else if doc.unread { parts.append(String(localized: "Unread")) }
+        if let n = changes, n > 0 { parts.append(Words.changes(n)) }
         if let lang = doc.langLabel { parts.append(lang) }
         if let snippet = match?.snippet { parts.append(snippet) }
         else if match?.name == true, match?.title == false { parts.append(fileName) }
         if !doc.folder.isEmpty { parts.append(doc.folder) }
         parts.append(Words.ago(doc.modified))
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The sidebar rows' "N changes": an open document's from its page (Page.changes), any other's
+/// counted here off the main thread from its baseline and the file, once per path and mtime.
+@MainActor @Observable final class SidebarChanges {
+    static let shared = SidebarChanges()
+    private(set) var counts: [String: Int] = [:]
+    /// What each count was made from: the file's mtime, or nil when its page set it.
+    @ObservationIgnored private var made: [String: Date?] = [:]
+
+    /// The count for a row (nil: none yet, or no baseline); starts counting if it is out of date.
+    func count(_ url: URL, modified: Date) -> Int? {
+        let path = url.standardizedFileURL.path
+        if let m = made[path], m == nil || m == modified { return counts[path] }
+        made[path] = modified
+        Task.detached(priority: .utility) {
+            guard let old = Baseline.read(url), let new = try? String(contentsOf: url, encoding: .utf8) else { return }
+            let n = old == new ? 0 : await ChangeCount.count(old: old, new: new)
+            await MainActor.run { if SidebarChanges.shared.made[path] == modified { SidebarChanges.shared.counts[path] = n } }
+        }
+        return counts[path]
+    }
+
+    /// A page's own count, which wins over a counted one while the page lives.
+    func set(_ url: URL, _ n: Int) {
+        let path = url.standardizedFileURL.path
+        made[path] = .some(nil)
+        if counts[path] != n { counts[path] = n }
+    }
+
+    /// Its page went (tab closed): count from the file again from now on.
+    func forget(_ url: URL) { made[url.standardizedFileURL.path] = nil }
+}
+
+/// "N changes since last read" as a small count, on a tab and a sidebar row; the words are its tooltip.
+struct ChangeChip: View {
+    let n: Int
+
+    var body: some View {
+        Text(verbatim: "\(n)")
+            .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 4.5)
+            .frame(minWidth: 15, minHeight: 14)
+            .background(Color.accentColor.opacity(0.14), in: Capsule())
+            .fixedSize()
+            .help(Words.changes(n))
+            .accessibilityLabel(Words.changes(n))
     }
 }
 

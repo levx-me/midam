@@ -265,3 +265,39 @@ mark { background: var(--mark); color: inherit; padding: 0 0.15em; }
 @media (max-width: 560px) { body { padding: calc(var(--header) + 48px) 22px 80px; } }
 
 iframe, object, embed { display: none; } /* blocked by CSP anyway */
+
+/* Changes since last read (render.js midamMarks): a bar in the margin left of a changed block
+   (box shadows, so blocks that scroll sideways do not clip it; the first paints the gap between
+   bar and block in the page colour), plus a faint tint over an added one. List items put the bar
+   left of their marker. */
+:root {
+  --change: color-mix(in srgb, var(--link) 60%, var(--bg));
+  --change-tint: color-mix(in srgb, var(--link) 7%, transparent);
+  --bar: -14px;
+}
+li { --bar: calc(-1.6em - 8px); }
+body > #content :is(.midam-changed, .midam-added, .midam-removed) {
+  box-shadow: calc(var(--bar) + 3px) 0 0 0 var(--bg), var(--bar) 0 0 0 var(--change);
+}
+body > #content .midam-added {
+  box-shadow: calc(var(--bar) + 3px) 0 0 0 var(--bg), var(--bar) 0 0 0 var(--change), inset 0 0 0 100vmax var(--change-tint);
+}
+body > #content pre:is(.midam-changed, .midam-added) { /* keeps the fence's own edge */
+  box-shadow: calc(var(--bar) + 3px) 0 0 0 var(--bg), var(--bar) 0 0 0 var(--change),
+    inset 2px 0 0 color-mix(in srgb, var(--code) 45%, transparent);
+}
+body > #content pre.midam-added {
+  box-shadow: calc(var(--bar) + 3px) 0 0 0 var(--bg), var(--bar) 0 0 0 var(--change),
+    inset 2px 0 0 color-mix(in srgb, var(--code) 45%, transparent), inset 0 0 0 100vmax var(--change-tint);
+}
+.midam-removed { list-style: none; margin: 0 0 var(--para); font-size: 0.85em; color: var(--muted); }
+li.midam-removed { margin: 0.2em 0; }
+body > #content .midam-removed { box-shadow: calc(var(--bar) + 3px) 0 0 0 var(--bg), var(--bar) 0 0 0 color-mix(in srgb, var(--change) 50%, var(--bg)); }
+.midam-removed-head { cursor: pointer; border-radius: 3px; }
+.midam-removed-head::before { content: "− "; }
+.midam-removed-head:hover { color: var(--text); }
+.midam-removed-head:focus-visible { outline: 2px solid var(--change); outline-offset: 2px; }
+.midam-removed-body { margin-top: 0.4em; white-space: pre-wrap; font-family: var(--code-font,) var(--mono); font-size: 0.95em; color: var(--muted); }
+@keyframes midam-flash { from { background-color: color-mix(in srgb, var(--link) 18%, transparent); } }
+.midam-flash { animation: midam-flash 1.1s ease-out; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .midam-flash { animation: none; outline: 2px solid var(--change); outline-offset: 3px; } }

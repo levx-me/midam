@@ -246,3 +246,15 @@
 "First %lld listed" = "처음 %lld개만 보여요";
 "Contents show in Reading view." = "목차는 읽기 보기에서 보여요.";
 "This document has no headings." = "이 문서에는 제목이 없어요.";
+
+/* Changes since last read (V3) */
+"Deleted: {words}, {n}" = "삭제됨: {words}, {n}";
+"1 line" = "1줄";
+"{n} lines" = "{n}줄";
+"1 change" = "1곳 바뀜";
+"%lld changes" = "%lld곳 바뀜";
+"No changes since last read" = "지난번에 읽은 뒤로 바뀐 곳이 없어요";
+"Change %lld of %lld" = "바뀐 곳 %lld/%lld";
+"Next · previous change" = "다음 · 이전 바뀐 곳";
+"Next Change" = "다음 바뀐 곳";
+"Previous Change" = "이전 바뀐 곳";

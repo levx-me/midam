@@ -28,7 +28,7 @@ function setBase(base) {
   const b = document.querySelector("base") || document.head.appendChild(document.createElement("base"));
   b.href = base;
 }
-async function midamRender(md, base, words) {
+async function midamRender(md, base, words, baseline) {
   const gen = ++renders, t0 = performance.now(), timing = {}; // timing: ms per step, logged by the app (OpenTiming)
   const lap = (name, since) => { timing[name] = Math.round(performance.now() - since); return performance.now(); };
   setBase(base);
@@ -51,6 +51,7 @@ async function midamRender(md, base, words) {
     const fig = document.createElement("figure");
     fig.className = "diagram";
     diagramSource.set(fig, code.textContent);
+    for (const a of ["data-src", "data-blk"]) if (code.parentElement.hasAttribute(a)) fig.setAttribute(a, code.parentElement.getAttribute(a));
     code.parentElement.replaceWith(fig);
     fig.appendChild(code.parentElement);
     return fig;
@@ -95,10 +96,11 @@ async function midamRender(md, base, words) {
   document.querySelector("body > #source").replaceWith(source);
   startSpy();
   tocHeads = outlineHeads(root);
+  const changes = midamMarks(baseline, md); // after the swap: `html` (the cache's) has no marks
   spySent = currentHeading(); // reported with the outline; the spy sends only changes from here
   lap("swap", t);
   lap("total", t0);
-  const result = { outline: midamOutline(tocHeads), current: spySent, html: html.length <= 10000000 ? html : null, timing };
+  const result = { outline: midamOutline(tocHeads), current: spySent, html: html.length <= 10000000 ? html : null, timing, changes };
   waiting = drawNow ? [] : figs;
   if (!figs.length || drawNow) return result;
   if (typeof mermaid === "undefined") return { ...result, html: null, diagrams: true };
@@ -114,7 +116,7 @@ async function midamDrawDiagrams() {
   waiting = [];
   if (typeof mermaid === "undefined" || !figs.length) return null;
   await Promise.all(figs.map(drawDiagram));
-  const html = document.querySelector("body > #content").innerHTML;
+  const html = unmarked(document.querySelector("body > #content"));
   return gen === renders && html.length <= 10000000 ? html : null;
 }
 
@@ -125,16 +127,18 @@ async function midamDrawDiagrams() {
 // from the cached ones, since mermaid removes any element that already holds the id it draws under.
 let cachedHTML = null;
 const sameRender = (a, b) => a.replace(/midam-diagram-\d+/g, "") === b.replace(/midam-diagram-\d+/g, "");
-function midamShowCached(html, base) {
+function midamShowCached(html, base, md, baseline, words) {
   setBase(base);
+  diagramWords = words || {};
   const shown = document.querySelector("body > #content");
   shown.innerHTML = html;
   cachedHTML = html;
   for (const m of html.matchAll(/midam-diagram-(\d+)/g)) diagramCount = Math.max(diagramCount, Number(m[1]));
   startSpy();
   tocHeads = outlineHeads(shown);
+  const changes = midamMarks(baseline, md);
   spySent = currentHeading();
-  return { outline: midamOutline(tocHeads), current: spySent };
+  return { outline: midamOutline(tocHeads), current: spySent, changes };
 }
 
 // A heading's id from its text, GitHub-style, numbered when repeated. Ids the app uses itself
@@ -601,4 +605,111 @@ if (globalThis.ResizeObserver) { // the Node tests load this file without a page
   document.addEventListener("scroll", e => {
     if (e.target !== document || scrollY - innerHeight / 2 < findBand[0] || scrollY + 1.5 * innerHeight > findBand[1]) findLayout();
   }, { capture: true, passive: true });
+}
+
+// MARK: Changes since last read (V3). The reading view's blocks that differ from the version last
+// read (the app's baseline) are marked by their data-blk (markdown.js): a changed block gets a bar
+// at its left, an added one the bar and a faint tint (style.css), and each removed run of blocks
+// one collapsed line in its place that opens to show the removed text. Marks are made after a
+// render swaps in and never reach the render cache (unmarked). Returns the number of places.
+let marked_ = { baseline: null, md: "" }, changePlaces = [];
+function midamMarks(baseline, md) {
+  if (md !== undefined) marked_ = { baseline, md };
+  else marked_.baseline = baseline; // the app's "read now": same text, new baseline
+  const root = document.querySelector("body > #content");
+  clearMarks(root);
+  changePlaces = [];
+  if (marked_.baseline == null || marked_.baseline === marked_.md) return 0;
+  let diff;
+  try { diff = midamDiff(marked_.baseline, marked_.md); } catch { return 0; }
+  const el = j => {
+    const e = root.querySelector('[data-blk="' + j + '"]');
+    return e && e.parentElement.classList.contains("table-wrap") ? e.parentElement : e;
+  };
+  const shown = diff.ops.map(o => (o.new === undefined ? null : el(o.new))); // per op: its element on screen
+  for (const place of diff.places) {
+    let first = null;
+    for (let k = 0; k < place.length; k++) {
+      const o = diff.ops[place[k]];
+      if (o.op === "removed") {
+        // A run of removed blocks: one line, before the next block on screen (or after the last).
+        let n = k;
+        while (n + 1 < place.length && diff.ops[place[n + 1]].op === "removed") n++;
+        const run = place.slice(k, n + 1).map(i => diff.ops[i]);
+        const after = shown.slice(place[n] + 1).find(Boolean), before = shown.slice(0, place[k]).reverse().find(Boolean);
+        const line = removedLine(run, (after || before)?.tagName === "LI");
+        if (after) after.before(line); else if (before) before.after(line); else root.append(line);
+        first ||= line;
+        k = n;
+      } else if (shown[place[k]]) {
+        shown[place[k]].classList.add(o.op === "added" ? "midam-added" : "midam-changed");
+        first ||= shown[place[k]];
+      }
+    }
+    if (first) changePlaces.push(first);
+  }
+  return diff.count;
+}
+
+function clearMarks(root) {
+  for (const e of root.querySelectorAll(".midam-removed")) e.remove();
+  for (const e of root.querySelectorAll(".midam-changed, .midam-added")) e.classList.remove("midam-changed", "midam-added");
+}
+
+// The content's HTML without the marks, for the render cache.
+function unmarked(root) {
+  const copy = root.cloneNode(true);
+  clearMarks(copy);
+  return copy.innerHTML;
+}
+
+// "Deleted: <first words>, N lines" (the app's words); Return or a click shows the removed text.
+function removedLine(run, inList) {
+  const w = diagramWords, lines = run.reduce((n, o) => n + o.lines, 0);
+  const line = document.createElement(inList ? "li" : "div");
+  line.className = "midam-removed";
+  const head = line.appendChild(document.createElement("span"));
+  head.className = "midam-removed-head";
+  head.tabIndex = 0;
+  head.setAttribute("role", "button");
+  head.setAttribute("aria-expanded", "false");
+  head.textContent = (w.deleted || "Deleted: {words}, {n}").replace("{words}", run[0].firstWords)
+    .replace("{n}", (lines === 1 ? w.line || "1 line" : w.lines || "{n} lines").replace("{n}", lines));
+  const body = line.appendChild(document.createElement("div"));
+  body.className = "midam-removed-body";
+  body.hidden = true;
+  body.textContent = run.map(o => o.raw.trimEnd()).join("\n\n");
+  return line;
+}
+
+function toggleRemoved(head) {
+  const body = head.nextElementSibling, open = body.hidden;
+  body.hidden = !open;
+  head.setAttribute("aria-expanded", String(open));
+}
+globalThis.addEventListener?.("click", e => {
+  const head = e.target instanceof Element && e.target.closest(".midam-removed-head");
+  if (head) toggleRemoved(head);
+});
+globalThis.addEventListener?.("keydown", e => {
+  if (e.key === "Enter" && e.target instanceof Element && e.target.matches(".midam-removed-head")) { e.preventDefault(); toggleRemoved(e.target); }
+});
+
+// n / N: the next or previous place below or above the reading line (wrapping), scrolled under
+// the header and flashed. Returns {index, count} (1-based; 0 when there are none).
+function midamChangeStep(d) {
+  const places = changePlaces.filter(e => e.isConnected);
+  if (!places.length || document.documentElement.dataset.view === "source") return { index: 0, count: places.length };
+  const line = headerInset + 24;
+  const tops = places.map(e => e.getBoundingClientRect().top);
+  let i = d > 0 ? tops.findIndex(t => t > line + 4) : tops.findLastIndex(t => t < line - 4);
+  if (i < 0) i = d > 0 ? 0 : places.length - 1;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  scrollBy({ top: tops[i] - line, behavior: reduce ? "auto" : "smooth" });
+  const e = places[i];
+  e.classList.remove("midam-flash");
+  void e.offsetWidth; // restart the animation
+  e.classList.add("midam-flash");
+  setTimeout(() => e.classList.remove("midam-flash"), 1200);
+  return { index: i + 1, count: places.length };
 }
