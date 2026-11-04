@@ -186,7 +186,21 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("cache: a changed document replaces the cached page", c.replaced, c);
   check("cache: diagram ids stay unique", new Set(c.ids).size === c.ids.length && c.ids.length === 1, c.ids);
 
+  // 5. A diagonal wheel over a block that scrolls sideways moves both: the block sideways, the page down.
+  await page.evaluate(async () => {
+    const wide = "x".repeat(600);
+    await midamRender("```\n" + (wide + "\n").repeat(40) + "```\n\n" + "Text.\n\n".repeat(200), "", {});
+    scrollTo(0, 0);
+  });
+  const box = await page.evaluate(() => { const b = document.querySelector("#content pre").getBoundingClientRect(); return { x: b.x + 40, y: b.y + b.height / 2 }; });
+  await page.mouse.move(box.x, box.y);
+  for (let i = 0; i < 5; i++) await page.mouse.wheel(20, 30);
+  await page.waitForTimeout(300);
+  const d = await page.evaluate(() => ({ y: scrollY, x: document.querySelector("#content pre").scrollLeft }));
+  check("diagonal wheel over a code block scrolls the page down", d.y >= 100, d);
+  check("diagonal wheel over a code block scrolls it sideways", d.x >= 60, d);
+
   await browser.close();
-  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout)`);
+  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel)`);
   process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("FAILED", e); process.exit(1); });

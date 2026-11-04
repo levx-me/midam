@@ -372,9 +372,13 @@ final class PageWebView: WKWebView {
     /// Whether what is under the fingers scrolls sideways itself (a wide table or code block),
     /// asked of the page when they touch the trackpad; nil until it answers.
     private var sideScroller: Bool?
+    /// The first events of a gesture that may be a swipe, kept from the page until SwipeRules
+    /// tells; empty when none is held.
+    private var held: [NSEvent] = []
 
     /// A two-finger sideways swipe goes back or forward, as in Safari, when the system's
-    /// "Swipe between pages" allows it and nothing under the fingers scrolls sideways.
+    /// "Swipe between pages" allows it and nothing under the fingers scrolls sideways. A gesture
+    /// with up or down in it scrolls, even when its first event leans sideways.
     override func scrollWheel(with event: NSEvent) {
         switch event.phase {
         case .mayBegin: probeSideScroller(at: convert(event.locationInWindow, from: nil))
@@ -383,16 +387,31 @@ final class PageWebView: WKWebView {
         }
         let store = Store.shared
         let back = store.history.canGoBack, forward = store.history.canGoForward
-        guard event.phase == .began, sideScroller == false, back || forward,
-              NSEvent.isSwipeTrackingFromScrollEventsEnabled,
-              abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
-        else { return super.scrollWheel(with: event) }
-        sideScroller = nil
-        // A positive amount is a swipe to the right: back. Each side clamps to 0 with nowhere to go.
-        event.trackSwipeEvent(options: [.lockDirection, .clampGestureAmount],
-                              dampenAmountThresholdMin: forward ? -1 : 0, max: back ? 1 : 0) { amount, phase, _, _ in
-            guard phase == .ended else { return } // the swipe went far enough to count
-            MainActor.assumeIsolated { amount > 0 ? store.goBack() : store.goForward() }
+        if event.phase == .began {
+            held = []
+            guard sideScroller == false, back || forward, NSEvent.isSwipeTrackingFromScrollEventsEnabled
+            else { return super.scrollWheel(with: event) }
+        } else if held.isEmpty {
+            return super.scrollWheel(with: event)
+        }
+        held.append(event)
+        let dx = held.reduce(0) { $0 + $1.scrollingDeltaX }, dy = held.reduce(0) { $0 + $1.scrollingDeltaY }
+        let moving = event.phase == .began || event.phase == .changed
+        switch moving ? SwipeRules.verdict(dx: dx, dy: dy) : .scroll {
+        case .undecided: return
+        case .scroll: // the page gets the whole gesture, a few events late
+            let events = held
+            held = []
+            for e in events { super.scrollWheel(with: e) }
+        case .swipe:
+            held = []
+            sideScroller = nil // the swipe takes the rest of the gesture, its end included
+            // A positive amount is a swipe to the right: back. Each side clamps to 0 with nowhere to go.
+            event.trackSwipeEvent(options: [.lockDirection, .clampGestureAmount],
+                                  dampenAmountThresholdMin: forward ? -1 : 0, max: back ? 1 : 0) { amount, phase, _, _ in
+                guard phase == .ended else { return } // the swipe went far enough to count
+                MainActor.assumeIsolated { amount > 0 ? store.goBack() : store.goForward() }
+            }
         }
     }
 

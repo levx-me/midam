@@ -7,6 +7,20 @@
 // Otherwise it returns the table of contents, {outline: [{level, text, id}], current: id or ""},
 // and the finished 읽기 HTML for the app's render cache (html: null when over 10 MB).
 let renders = 0, askedForMermaid = false;
+
+// A trackpad gesture over a block that scrolls sideways (code, a wide table, diagram or formula)
+// moves both ways at once: the block sideways, the page up and down. WebKit would hand the whole
+// gesture to the block, which cannot scroll vertically, and drop the vertical part. Pinch (ctrl) stays native.
+globalThis.addEventListener?.("wheel", e => { // ?.: the Node tests load this file without a window
+  if (e.ctrlKey || !e.deltaY) return;
+  let block = e.target instanceof Element ? e.target : e.target.parentElement;
+  while (block && block !== document.body && !(block.scrollWidth > block.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(block).overflowX)))
+    block = block.parentElement;
+  if (!block || block === document.body) return;
+  e.preventDefault();
+  block.scrollLeft += e.deltaX;
+  scrollBy(0, e.deltaY);
+}, { passive: false });
 function setBase(base) {
   if (!base) return;
   const b = document.querySelector("base") || document.head.appendChild(document.createElement("base"));
