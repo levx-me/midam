@@ -716,31 +716,6 @@ struct LanguageSection: View {
     }
 }
 
-/// Projects hidden from the sidebar (its ⋯ menu), each with a way back.
-struct HiddenProjectsSection: View {
-    @ObservedObject private var library = LibraryModel.shared
-
-    var body: some View {
-        Section("Hidden Projects") {
-            if library.hidden.isEmpty {
-                Text("Projects you hide from the sidebar appear here.").foregroundStyle(Color(nsColor: .muted))
-            } else {
-                ForEach(library.hidden.sorted(), id: \.self) { id in
-                    let name = (id as NSString).lastPathComponent
-                    LabeledContent {
-                        Button("Show in Sidebar") { library.unhide(id) }
-                            .actionButton()
-                            .accessibilityLabel(Text(verbatim: String(format: String(localized: "Show %@ in Sidebar"), name)))
-                    } label: {
-                        Text(verbatim: name)
-                        Text(verbatim: (id as NSString).abbreviatingWithTildeInPath)
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// The render cache (RenderCache): its size, and a way to empty it.
 struct CacheSection: View {
     @State private var size: Int?
@@ -908,7 +883,6 @@ struct GeneralSettings: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Color(nsColor: .muted))
             }
-            HiddenProjectsSection()
             CacheSection()
             CommandLineSection()
             ResetRow()

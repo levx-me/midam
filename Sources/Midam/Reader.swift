@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 // One reader window owning the open files as tabs of our own (native window tabbing
 // cannot hide its bar with two or more tabs). Every way of opening a file goes through
@@ -426,6 +427,12 @@ import UniformTypeIdentifiers
     /// Agents of every project opened this run.
     private var allAgents: [AgentTab] { agents + parked.values.flatMap(\.agents) }
 
+    /// The open tab of `session`, in any project.
+    func agentTab(session: String) -> AgentTab? { allAgents.first { $0.session == session } }
+
+    /// An agent of project `root` is at work or waiting: the project can't be removed now.
+    func running(in root: String) -> Bool { allAgents.contains { $0.group == root && $0.busy } }
+
     /// Into its project's strip: the current one, else that project's parked tabs.
     private func add(_ tab: AgentTab, select show: Bool) {
         if tab.group == project {
@@ -481,6 +488,7 @@ import UniformTypeIdentifiers
         if record, tab.id != selected, let here = here() { history.leave(here) }
         Welcome.launchEmpty = false
         selected = tab.id
+        tab.unseen = false
         window?.title = tab.title
         window?.representedURL = nil
         save()
@@ -497,6 +505,7 @@ import UniformTypeIdentifiers
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         agents.removeAll { $0.id == tab.id }
+        if let s = tab.session { LibraryModel.shared.setBlocked(s, root: tab.group, false) }
         tab.terminal?.terminate()
         if let s = tab.session, tab.terminal == nil { Task { try? await host.close(s) } }
         closed(at: i, wasSelected: selected == tab.id)
@@ -539,7 +548,10 @@ import UniformTypeIdentifiers
             guard let tab = allAgents.first(where: { $0.session == info.id }) else { return }
             if info.state == .blocked, tab.state != .blocked {
                 AccessibilityNotification.Announcement(String(localized: "Waiting for you")).post()
+                if !NSApp.isActive { notifyBlocked(tab, topic: info.topic) }
             }
+            if tab.state == .working, info.state == .idle, tab.id != selected { tab.unseen = true } // done, not seen yet
+            LibraryModel.shared.setBlocked(info.id, root: tab.group, info.state == .blocked)
             tab.info = info
             if tab.id == selected { window?.title = tab.title }
             if info.subagents > 0, tab.group == project, teamShown.insert(info.id).inserted { show(.team) }
@@ -713,6 +725,34 @@ import UniformTypeIdentifiers
     func windowDidExitFullScreen(_ notification: Notification) { measureLights() }
 }
 
+extension Store: UNUserNotificationCenterDelegate {
+    /// One banner for an agent that started waiting while Midam is in the background; the first
+    /// one asks macOS for permission. Not in an unbundled build (the tests'), which has no centre.
+    func notifyBlocked(_ tab: AgentTab, topic: String?) {
+        guard Bundle.main.bundleIdentifier != nil, let session = tab.session else { return }
+        let content = UNMutableNotificationContent()
+        content.title = topic ?? tab.title
+        content.body = String(localized: "Waiting for you")
+        content.userInfo = ["session": session, "project": tab.project]
+        let request = UNNotificationRequest(identifier: session, content: content, trigger: nil)
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+            try? await center.add(request)
+        }
+    }
+
+    /// A click on the banner: that conversation, in front.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let info = response.notification.request.content.userInfo
+        guard let session = info["session"] as? String, let project = info["project"] as? String else { return }
+        await MainActor.run {
+            NSApp.activate()
+            Store.shared.openAgent(project: project, resume: session)
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false // no native tab bar or its Window menu items
@@ -721,6 +761,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Store.shared.restore()
+        if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = Store.shared }
         // With a cached list from the last run the sidebar is filled at once: no welcome then.
         Welcome.launchEmpty = Store.shared.files.isEmpty && !FileManager.default.fileExists(atPath: LibraryCache.standardURL.path)
         // Settings' font lists, built once off the main thread so the Fonts tab opens at once.

@@ -3,10 +3,11 @@ import UniformTypeIdentifiers
 import SwiftUI
 import WebKit
 
-// The left sidebar, Mail-style: the documents agents wrote (LibraryModel), by project, then by
-// kind, newest first. A click opens a document as a tab (Store.open focuses one already open).
-// Also the content area's own screens while no tab is open: the first run's welcome, or a calm
-// empty page.
+// The left sidebar, Mail-style: the registered projects (LibraryModel), each with its agents
+// (Midam's conversations, with what they are doing and the documents each wrote), then its
+// documents by kind, newest first. A click opens a document as a tab (Store.open focuses one
+// already open) or brings an agent's conversation forward. Also the content area's own screen
+// while no tab is open.
 
 extension DocKind {
     /// The shown name; the raw value is the stored ID and never shown.
@@ -60,8 +61,7 @@ struct ProjectDrag: Transferable, Codable {
     /// The project or document a drag started from: drop targets light up only for what they take.
     @Published var draggingProject: String?
     @Published var draggingDoc: String?
-    @Published var addingProject = false
-    /// Projects just added from the Add Project sheet: selected and scrolled to once a scan lists them.
+    /// Projects just registered (an agent or a file opened in them): selected and scrolled to once listed.
     var reveal: [String] = []
     /// A row to bring into view (ScrollViewReader); cleared once scrolled.
     @Published var scrollTarget: SidebarItem?
@@ -107,12 +107,25 @@ struct ProjectDrag: Transferable, Codable {
 
     static func key(_ project: LibraryProject, _ kind: DocKind) -> String { project.id + "\u{1F}" + kind.rawValue }
 
-    /// The tree as the filters leave it.
+    /// The tree as the filters leave it; the search also keeps projects whose agents' topics match.
     func shown(_ list: [LibraryProject]) -> [LibraryProject] {
-        var list = list
-        if let kept = keptUnread { list = Library.unreadFilter(list, kept: kept) }
-        if let m = matches { list = Library.filter(list) { m[$0.id] != nil } }
-        return list
+        var out = list
+        if let kept = keptUnread { out = Library.unreadFilter(out, kept: kept) }
+        if let m = matches {
+            out = Library.filter(out) { m[$0.id] != nil }
+            let have = Set(out.map(\.id))
+            out += list.filter { !have.contains($0.id) && !agents(of: $0.id).isEmpty }.map { var p = $0; p.groups = []; return p }
+        }
+        return out
+    }
+
+    /// A project's agents as the filters leave them: all, none under the unread filter, the
+    /// matching ones while searching.
+    func agents(of root: String) -> [AgentConversation] {
+        let all = LibraryModel.shared.conversations(in: root)
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if searching, !q.isEmpty { return all.filter { !Library.ranges(of: q, in: $0.topic ?? "").isEmpty } }
+        return unreadOnly ? [] : all
     }
 
     /// While a filter is on, groups it brings into view open once; one the user then closes stays closed.
@@ -198,8 +211,12 @@ struct ProjectDrag: Transferable, Codable {
 
 enum SidebarItem: Hashable {
     case project(String)
+    /// An agent: its AgentConversation id.
+    case agent(String)
     case kind(String, DocKind)
     case doc(String)
+    /// A document listed under the agent (conversation id) that wrote it.
+    case agentDoc(String, String)
 }
 
 /// Counts and times as the sidebar words them, in the app's language.
@@ -225,22 +242,8 @@ enum SidebarItem: Hashable {
         n == 1 ? String(localized: "1 change") : String(format: String(localized: "%lld changes"), n)
     }
 
-    static func claudeProjects(_ n: Int) -> String {
-        n == 1 ? String(localized: "1 Claude Code project") : String(format: String(localized: "%lld Claude Code projects"), n)
-    }
-
-    static func codexSessions(_ n: Int) -> String {
-        n == 1 ? String(localized: "1 Codex session") : String(format: String(localized: "%lld Codex sessions"), n)
-    }
-
-    /// "Watching 3 Claude Code projects and 2 Codex sessions"; nil when no agent was found.
-    static func watching(_ a: FoundAgents) -> String? {
-        switch (a.claudeProjects > 0, a.codexSessions > 0) {
-        case (true, true): String(format: String(localized: "Watching %@ and %@"), claudeProjects(a.claudeProjects), codexSessions(a.codexSessions))
-        case (true, false): String(format: String(localized: "Watching %@"), claudeProjects(a.claudeProjects))
-        case (false, true): String(format: String(localized: "Watching %@"), codexSessions(a.codexSessions))
-        case (false, false): nil
-        }
+    static func subagents(_ n: Int) -> String {
+        n == 1 ? String(localized: "1 subagent") : String(format: String(localized: "%lld subagents"), n)
     }
 
     /// `text` with each match of `query` marked (semibold on a soft tint that reads in both appearances).
@@ -311,12 +314,20 @@ enum SidebarItem: Hashable {
         Store.shared.open(first)
     }
 
-    static func hide(_ id: String) {
-        Sidebar.animate {
-            library.unpin(id)
-            library.hide(id)
-        }
-        say(String(localized: "Hidden from the list. Settings brings it back."))
+    static func newAgent(_ id: String) { Store.shared.openAgent(project: id, resume: nil) }
+
+    /// Takes the project off the list after asking (nothing on disk is touched); not while one of
+    /// its agents is at work.
+    static func remove(_ id: String) {
+        guard !Store.shared.running(in: id) else { return }
+        let alert = NSAlert()
+        alert.messageText = String(format: String(localized: "Remove “%@” from Midam?"), (id as NSString).lastPathComponent)
+        alert.informativeText = String(localized: "Its folder and documents stay on this Mac. Add an agent in it to bring it back.")
+        alert.addButton(withTitle: String(localized: "Remove"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Sidebar.animate { library.unregister(root: id) }
+        say(String(localized: "Project removed"))
     }
 
     static func available(_ id: String) -> (pinned: Bool, unread: Bool, index: Int?, count: Int) {
@@ -332,6 +343,8 @@ private struct ProjectMenu: View {
 
     var body: some View {
         let a = ProjectActions.available(id)
+        Button("New Agent") { ProjectActions.newAgent(id) }
+        Divider()
         if a.pinned { Button("Unpin") { ProjectActions.togglePin(id) } } else { Button("Pin") { ProjectActions.togglePin(id) } }
         if a.pinned, let i = a.index {
             Button("Move Up") { ProjectActions.move(id, by: -1) }.disabled(i == 0)
@@ -341,10 +354,12 @@ private struct ProjectMenu: View {
         Button("Mark All as Read") { ProjectActions.markAllRead(id) }.disabled(!a.unread)
         Button("Open All in Tabs") { ProjectActions.openAll(id) }
         Divider()
-        Button("Show in Finder") { ProjectActions.reveal(id) }
-        Button("Copy Path") { ProjectActions.copyPath(id) }
+        Menu("Advanced") {
+            Button("Show in Finder") { ProjectActions.reveal(id) }
+            Button("Copy Path") { ProjectActions.copyPath(id) }
+        }
         Divider()
-        Button("Hide from List") { ProjectActions.hide(id) }
+        Button("Remove Project…") { ProjectActions.remove(id) }.disabled(Store.shared.running(in: id))
     }
 }
 
@@ -366,6 +381,9 @@ struct Sidebar: View {
                     HStack(spacing: 0) {
                         SidebarToggle(store: store)
                         UnreadFilterButton(state: state)
+                        StripIcon(label: "Add Agent", keys: [.newAgent], action: { store.newAgentOpen = true }) {
+                            Image(systemName: "plus")
+                        }
                     }
                     .frame(height: TitleStrip.capsule)
                     .padding(.top, store.rowTop)
@@ -376,13 +394,13 @@ struct Sidebar: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
-            if library.projects.isEmpty { SidebarEmpty(library: library) }
+            if library.registered.isEmpty { AgentEmpty(store: store, compact: true) }
+            else if library.projects.isEmpty { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if shown.isEmpty, state.filtering { FilterEmpty(state: state) }
             else { list(shown).clipped() } // rows scroll out of sight below the lights' strip, not under it
             footer
         }
         .background { SidebarMaterial().ignoresSafeArea() }
-        .sheet(isPresented: $state.addingProject) { AddProjectSheet() }
         .onChange(of: Library.groupKeys(shown), initial: true) { _, keys in state.autoExpand(keys) }
         .onChange(of: library.projects) { if state.matches != nil { state.runSearch() } } // new or changed docs
     }
@@ -471,7 +489,7 @@ struct Sidebar: View {
                 Section {
                     ForEach(parts.all) { tree($0, pinned: nil) }
                 } header: {
-                    SectionHeader(title: Text("All Projects"), add: true)
+                    SectionHeader(title: Text("All Projects"))
                 }
             }
         }
@@ -523,9 +541,10 @@ struct Sidebar: View {
         }
     }
 
-    /// A project, its kinds and their documents. `pinned` is the pinned section's rows, nil in All.
+    /// A project, its agents, its kinds and their documents. `pinned` is the pinned section's rows, nil in All.
     private func tree(_ project: LibraryProject, pinned: [LibraryProject]?) -> some View {
         DisclosureGroup(isExpanded: state.isOpen(project.id)) {
+            ForEach(state.agents(of: project.id)) { agentTree($0, in: project) }
             ForEach(project.groups) { group in
                 let key = SidebarState.key(project, group.kind)
                 DisclosureGroup(isExpanded: state.isOpen(key)) {
@@ -545,6 +564,29 @@ struct Sidebar: View {
         }
     }
 
+    /// An agent, and under it the documents its session wrote, newest first.
+    @ViewBuilder private func agentTree(_ c: AgentConversation, in project: LibraryProject) -> some View {
+        let row = AgentRow(conversation: c, tab: c.sessionID.flatMap(store.agentTab(session:))) { primary(.agent(c.id)) }
+            .tag(SidebarItem.agent(c.id))
+        let docs = written(by: c, in: project)
+        if docs.isEmpty { row }
+        else {
+            DisclosureGroup(isExpanded: state.isOpen("agent\u{1F}" + c.id)) {
+                ForEach(docs) { doc in
+                    DocRow(doc: doc, url: library.url(for: doc), match: nil, query: "") { primary(.agentDoc(c.id, doc.id)) }
+                        .tag(SidebarItem.agentDoc(c.id, doc.id))
+                }
+            } label: { row }
+        }
+    }
+
+    // ponytail: filters every scanned document per agent on each render; index by session if lists get long.
+    private func written(by c: AgentConversation, in project: LibraryProject) -> [LibraryDoc] {
+        guard let session = c.sessionID else { return [] }
+        let byId = Dictionary(project.groups.flatMap(\.docs).map { ($0.id, $0) }) { a, _ in a }
+        return store.host.docs(ofSession: session).compactMap { byId[$0.id] }
+    }
+
     private var footer: some View { ScanLine(scanning: library.scanning, progress: library.progress) }
 
     // MARK: Actions
@@ -558,7 +600,11 @@ struct Sidebar: View {
 
     private func syncSelection() {
         guard let here = store.current?.url.resolvingSymlinksInPath().path, let id = library.docAtPath[here] else {
-            state.selection = store.project.map { .project($0) } // a conversation: its project's row
+            if let s = store.currentAgent?.session, let c = library.conversations.first(where: { $0.sessionID == s }) {
+                state.selection = .agent(c.id) // a conversation: its agent's row
+            } else {
+                state.selection = store.project.map { .project($0) }
+            }
             return
         }
         if state.selection != .doc(id) { state.selection = .doc(id) }
@@ -574,7 +620,7 @@ struct Sidebar: View {
         }
         if state.selection != item { state.selection = item } // a click selects its row, as the arrow keys do
         switch item {
-        case .doc(let id):
+        case .doc(let id), .agentDoc(_, let id):
             guard let (_, doc) = find(id), !doc.deleted else { return } // a deleted one has nothing to show (V4)
             store.open(library.url(for: doc))
             if NSApp.currentEvent?.type == .keyDown, let w = NSApp.keyWindow { // Return: on to reading
@@ -583,6 +629,9 @@ struct Sidebar: View {
         case .project(let id):
             state.expanded.formSymmetricDifference([id])
             store.switchProject(id) // its tabs
+        case .agent(let id):
+            guard let c = library.conversations.first(where: { $0.id == id }) else { return }
+            store.openAgent(project: c.root, resume: c.sessionID) // its tab, opened again if closed
         case .kind(let pid, let kind):
             state.expanded.formSymmetricDifference([pid + "\u{1F}" + kind.rawValue])
         }
@@ -590,7 +639,7 @@ struct Sidebar: View {
 
     @ViewBuilder private func menu(_ item: SidebarItem) -> some View {
         switch item {
-        case .doc(let id):
+        case .doc(let id), .agentDoc(_, let id):
             if let (_, doc) = find(id) {
                 Button("Open") { primary(item) }.disabled(doc.deleted)
                 Menu("Move to Kind") {
@@ -611,7 +660,7 @@ struct Sidebar: View {
             }
         case .project(let id):
             ProjectMenu(id: id)
-        case .kind:
+        case .kind, .agent:
             EmptyView()
         }
     }
@@ -727,33 +776,17 @@ private struct SidebarSearchField: View {
     }
 }
 
-/// A section's title; All Projects has a + (Add Project…) at its trailing edge on hover, and
-/// the Pinned title takes a dragged project as a pin at the bottom.
+/// A section's title; the Pinned title takes a dragged project as a pin at the bottom.
 private struct SectionHeader: View {
     let title: Text
-    var add = false
     var dropPins = false
     @ObservedObject private var state = SidebarState.shared
-    @State private var hovering = false
     @State private var targeted = false
 
     var body: some View {
         HStack(spacing: 4) {
             title
             Spacer(minLength: 0)
-            if add {
-                Button { AddProject.show() } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 20, height: 18)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .opacity(hovering ? 1 : 0)
-                .help("Add Project…")
-                .accessibilityLabel("Add Project…")
-            }
         }
         .padding(.vertical, 2)
         .background {
@@ -762,11 +795,9 @@ private struct SectionHeader: View {
             }
         }
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
         .pinDrop(onto: nil, if: dropPins, targeted: $targeted)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityAction(named: Text("Add Project…")) { if add { AddProject.show() } }
     }
 }
 
@@ -956,20 +987,18 @@ private struct ProjectRow: View {
     let pinnedRows: [LibraryProject]?
     let click: () -> Void
     @ObservedObject private var state = SidebarState.shared
+    @ObservedObject private var library = LibraryModel.shared
     @State private var targeted = false
     @State private var hovering = false
+
+    private var waiting: Bool { library.blocked.values.contains(project.id) }
 
     var body: some View {
         HStack(spacing: 4) {
             Label {
-                HStack(spacing: 5) {
-                    Text(verbatim: project.name).fontWeight(project.unread > 0 ? .bold : .medium).lineLimit(1)
-                    if let parent = project.parent {
-                        Text(verbatim: parent).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
+                Text(verbatim: project.name).fontWeight(project.unread > 0 ? .bold : .medium).lineLimit(1)
             } icon: {
-                Image(systemName: "folder")
+                Image(systemName: "folder").overlay { if waiting { AttentionRing() } }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -1005,9 +1034,10 @@ private struct ProjectRow: View {
         .accessibilityAction(named: Text("Move Down")) { if pinnedRows != nil { ProjectActions.move(project.id, by: 1) } }
         .accessibilityAction(named: Text("Mark All as Read")) { ProjectActions.markAllRead(project.id) }
         .accessibilityAction(named: Text("Open All in Tabs")) { ProjectActions.openAll(project.id) }
+        .accessibilityAction(named: Text("New Agent")) { ProjectActions.newAgent(project.id) }
         .accessibilityAction(named: Text("Show in Finder")) { ProjectActions.reveal(project.id) }
         .accessibilityAction(named: Text("Copy Path")) { ProjectActions.copyPath(project.id) }
-        .accessibilityAction(named: Text("Hide from List")) { ProjectActions.hide(project.id) }
+        .accessibilityAction(named: Text("Remove Project…")) { ProjectActions.remove(project.id) }
     }
 
     /// Where the dragged project will land: a pinned one from above goes below this row; one from
@@ -1026,10 +1056,128 @@ private struct ProjectRow: View {
     }
 
     private var label: String {
-        var parts = [project.parent.map { "\(project.name), \($0)" } ?? project.name, Words.documents(project.docCount)]
+        var parts = [project.name, Words.documents(project.docCount)]
         if project.unread > 0 { parts.append(Words.unread(project.unread)) }
+        if waiting { parts.append(String(localized: "Waiting for you")) }
         if pinnedRows != nil { parts.append(String(localized: "Pinned")) }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The accent ring around a row's glyph while an agent waits for the person.
+private struct AttentionRing: View {
+    var body: some View {
+        Circle().strokeBorder(Color.accentColor, lineWidth: 1.5).frame(width: 20, height: 20).accessibilityHidden(true)
+    }
+}
+
+/// What an agent is doing, as the sidebar shows it (plan §3).
+enum AgentLook {
+    case working, blocked, idle, done
+
+    init(_ state: Conversation.State?, unseen: Bool) {
+        switch state {
+        case .working: self = .working
+        case .blocked: self = .blocked
+        default: self = unseen ? .done : .idle
+        }
+    }
+
+    var word: String {
+        switch self {
+        case .working: String(localized: "Working")
+        case .blocked: String(localized: "Waiting for you")
+        case .idle: String(localized: "Idle")
+        case .done: String(localized: "Done")
+        }
+    }
+
+    var dot: Color {
+        switch self {
+        case .working: .green
+        case .blocked, .done: .accentColor
+        case .idle: .clear
+        }
+    }
+}
+
+/// An agent under its project: its glyph (ringed while it waits), topic and state dot; below,
+/// the state, model, how full its context is (red from 80%) and its subagents at work.
+private struct AgentRow: View {
+    let conversation: AgentConversation
+    /// Its open tab, if any (in any project's strip); a closed one is idle.
+    let tab: AgentTab?
+    let click: () -> Void
+
+    var body: some View {
+        if let tab { Live(conversation: conversation, tab: tab, click: click) }
+        else { Content(conversation: conversation, info: nil, look: .idle, click: click) }
+    }
+
+    private struct Live: View {
+        let conversation: AgentConversation
+        @ObservedObject var tab: AgentTab
+        let click: () -> Void
+        var body: some View {
+            Content(conversation: conversation, info: tab.info, look: AgentLook(tab.info?.state, unseen: tab.unseen), click: click)
+        }
+    }
+
+    private struct Content: View {
+        let conversation: AgentConversation
+        let info: SessionInfo?
+        let look: AgentLook
+        let click: () -> Void
+        @Environment(\.backgroundProminence) private var prominence
+
+        private var topic: String {
+            info?.topic ?? conversation.topic ?? String(format: String(localized: "Claude · %@"), (conversation.root as NSString).lastPathComponent)
+        }
+
+        var body: some View {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        Text(verbatim: topic).lineLimit(1).fontWeight(look == .blocked || look == .done ? .semibold : .regular)
+                        Spacer(minLength: 4)
+                        Circle().fill(prominence == .increased && look != .idle ? Color.white : look.dot)
+                            .overlay { if look == .idle { Circle().strokeBorder(.secondary, lineWidth: 1) } }
+                            .frame(width: 7, height: 7)
+                    }
+                    details.font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: "sparkle").overlay { if look == .blocked { AttentionRing() } }
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+            .help(look.word)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: label))
+            .accessibilityAction(.default, click)
+        }
+
+        private var parts: [String] {
+            var out = [look.word]
+            if let m = info?.model { out.append(m.replacingOccurrences(of: "claude-", with: "")) }
+            if let n = info?.subagents, n > 0 { out.append(Words.subagents(n)) }
+            return out
+        }
+
+        private var details: Text {
+            var t = Text(verbatim: parts.prefix(2).joined(separator: " · "))
+            if let p = info?.contextPercent {
+                t = t + Text(verbatim: " · ") + Text(verbatim: "\(p)%").foregroundColor(p >= 80 ? .red : nil)
+            }
+            if parts.count > 2 { t = t + Text(verbatim: " · " + parts[2]) }
+            return t
+        }
+
+        private var label: String {
+            var out = [topic] + parts
+            if let p = info?.contextPercent { out.append(String(format: String(localized: "Context %lld%% full"), p)) }
+            return out.joined(separator: ", ")
+        }
     }
 }
 
@@ -1165,7 +1313,14 @@ private struct DocRow: View {
         return url
     }
 
-    private var secondLine: String { doc.folder.isEmpty ? Words.ago(doc.modified) : doc.folder + " · " + Words.ago(doc.modified) }
+    private var secondLine: String { [writer, Words.ago(doc.modified)].compactMap { $0 }.joined(separator: " · ") }
+
+    /// The agent that wrote it: its conversation's topic, else the agent's name.
+    private var writer: String? {
+        let library = LibraryModel.shared
+        guard let s = library.session(for: url.path) else { return nil }
+        return library.conversations.first { $0.sessionID == s.id }?.topic ?? (s.agent == .codex ? "Codex" : "Claude")
+    }
 
     private var label: String {
         var parts = [doc.title]
@@ -1174,8 +1329,7 @@ private struct DocRow: View {
         if let lang = doc.langLabel { parts.append(lang) }
         if let snippet = match?.snippet { parts.append(snippet) }
         else if match?.name == true, match?.title == false { parts.append(fileName) }
-        if !doc.folder.isEmpty { parts.append(doc.folder) }
-        parts.append(Words.ago(doc.modified))
+        parts.append(secondLine)
         return parts.joined(separator: ", ")
     }
 }
@@ -1255,40 +1409,39 @@ private struct FilterEmpty: View {
     }
 }
 
-/// The sidebar with nothing to list yet: still looking, agents found but no documents, or none found.
-private struct SidebarEmpty: View {
-    @ObservedObject var library: LibraryModel
+/// Nothing registered yet: a way to add the first agent, or how to set Claude up first.
+struct AgentEmpty: View {
+    @ObservedObject var store: Store
+    /// The sidebar's smaller version.
+    var compact = false
+    @State private var installed: Bool?
 
     var body: some View {
-        VStack(spacing: 10) {
-            if !library.scannedOnce {
-                ProgressView().controlSize(.small)
-                Text("Looking for documents…").foregroundStyle(.secondary)
+        VStack(spacing: compact ? 8 : 10) {
+            if installed == false {
+                Text("Claude isn't set up on this Mac yet.").fontWeight(.medium)
+                Text("Install Claude Code from claude.com/code, sign in once in Terminal, then come back here.").foregroundStyle(.secondary)
             } else {
-                if let watching = Words.watching(library.agents) {
-                    Text(verbatim: watching).fontWeight(.medium)
-                    Text("Documents agents write in .md gather here").foregroundStyle(.secondary)
-                } else {
-                    Text("No agent history found on this Mac yet.").foregroundStyle(.secondary)
-                }
-                Button("Add Project…") { AddProject.show() }
-                    .controlSize(.regular)
-                    .padding(.top, 4)
+                Text("Add an agent to get started").fontWeight(.medium)
+                Button("Add Agent") { store.newAgentOpen = true }
+                    .controlSize(compact ? .regular : .large)
+                    .padding(.top, 2)
             }
         }
-        .font(.system(size: 12))
+        .font(.system(size: compact ? 12 : 14))
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
+        .task { installed = await store.host.claudeInstalled() }
     }
 }
 
 // MARK: Content area with no tab
 
-/// What the content area shows with no tab open: the welcome on the very first run while the
-/// first scan runs (D10), otherwise a calm empty page. Files dropped on it open.
+/// What the content area shows with no tab open: the first agent's start while nothing is
+/// registered, otherwise a calm empty page. Files dropped on it open.
 struct NoDocument: View {
     @ObservedObject var store: Store
     let text: Color
@@ -1297,7 +1450,7 @@ struct NoDocument: View {
 
     var body: some View {
         Group {
-            if Welcome.launchEmpty { WelcomeView(library: library, text: text, muted: muted) }
+            if library.registered.isEmpty { AgentEmpty(store: store) }
             else {
                 VStack(spacing: 6) {
                     Text("No Document Open").font(.system(size: 15, weight: .medium)).foregroundStyle(muted)
@@ -1327,55 +1480,6 @@ enum Welcome {
     /// Set at launch when no tab opened or was restored and no cached list exists (spec: the
     /// welcome shows on every such launch); the first tab shown ends it (Store.select).
     @MainActor static var launchEmpty = false
-}
-
-private struct WelcomeView: View {
-    @ObservedObject var library: LibraryModel
-    let text: Color
-    let muted: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Welcome to Midam")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(text)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Midam gathers the Markdown documents your coding agents write, by project, in the sidebar. Everything stays on this Mac.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Agents on this Mac")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(muted)
-                    .accessibilityAddTraits(.isHeader)
-                agent("Claude Code", found: library.agents.claudeProjects, Words.claudeProjects)
-                agent("Codex", found: library.agents.codexSessions, Words.codexSessions)
-            }
-            if library.scanning {
-                ProgressView(value: library.progress) {
-                    Text("Looking for documents…").font(.system(size: 12)).foregroundStyle(muted)
-                }
-                .progressViewStyle(.linear)
-                .controlSize(.small)
-            }
-        }
-        .frame(maxWidth: 380, alignment: .leading)
-    }
-
-    private func agent(_ name: String, found n: Int, _ words: (Int) -> String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: n > 0 ? "checkmark.circle.fill" : "circle.dashed")
-                .foregroundStyle(n > 0 ? text : muted)
-                .accessibilityHidden(true)
-            if n > 0 { Text(verbatim: words(n)).foregroundStyle(text) }
-            else { Text(verbatim: name + " · ").foregroundStyle(muted) + Text("Not found").foregroundStyle(muted) }
-        }
-        .font(.system(size: 13))
-        .accessibilityElement(children: .combine)
-    }
 }
 
 // MARK: Layout

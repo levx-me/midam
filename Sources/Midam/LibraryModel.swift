@@ -58,7 +58,7 @@ import AppKit
         pinned = state.pinned
         registered = state.added
         conversations = Self.load(Key.conversations, [])
-        for old in ["library.order", "library.folders"] { UserDefaults.standard.removeObject(forKey: old) } // replaced by pins and Add Project
+        for old in ["library.order", "library.folders"] { UserDefaults.standard.removeObject(forKey: old) } // replaced by pins and the registry
     }
 
     // MARK: Scanning
@@ -176,13 +176,25 @@ import AppKit
         }
     }
 
+    /// Every registered project is listed, one with no documents yet (only agents) after the rest.
     private func recompute() {
-        let next = Library.projects(infos.filter { state.added.contains($0.project) }, state: state)
+        var next = Library.projects(infos.filter { state.added.contains($0.project) }, state: state)
+        let listed = Set(next.map(\.id))
+        next += state.added.subtracting(listed).sorted().map {
+            LibraryProject(id: $0, name: ($0 as NSString).lastPathComponent, parent: nil, groups: [], docCount: 0, unread: 0, lastModified: .distantPast)
+        }
         if next != projects { projects = next }
     }
 
+    /// Sessions waiting for the person (a permission or a question), by session id → project
+    /// root; Store keeps it, the sidebar rings and the Dock badge read it.
+    @Published private(set) var blocked: [String: String] = [:] { didSet { if blocked != oldValue { updateBadge() } } }
+
+    func setBlocked(_ session: String, root: String, _ on: Bool) { blocked[session] = on ? root : nil }
+
+    /// The Dock badge: agents waiting for the person if any, else unread documents.
     private func updateBadge() {
-        let n = totalUnread
+        let n = blocked.isEmpty ? totalUnread : blocked.count
         NSApp?.dockTile.badgeLabel = n > 0 ? String(n) : nil
     }
 
@@ -282,12 +294,6 @@ import AppKit
 
     /// Whether `path` is in a registered project; a plain .md outside them lives only as a tab.
     func isInRegisteredProject(_ path: String) -> Bool { Registry.contains(path, in: state.added) }
-
-    // Compatibility with the old sidebar and Add Project sheet (the sidebar rework removes them).
-    var hidden: Set<String> { [] }
-    func unhide(_ id: String) {}
-    func hide(_ id: String) { unregister(root: id) }
-    func add(_ roots: Set<String>) { roots.forEach { register(root: $0) } }
 
     // MARK: Conversations
 

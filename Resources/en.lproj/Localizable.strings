@@ -168,27 +168,12 @@
 "Move Up" = "Move Up";
 "Move Down" = "Move Down";
 "Moved to position %lld of %lld" = "Moved to position %lld of %lld";
-"Add" = "Add";
 "Looking for documents…" = "Looking for documents…";
-"1 Claude Code project" = "1 Claude Code project";
-"%lld Claude Code projects" = "%lld Claude Code projects";
-"1 Codex session" = "1 Codex session";
-"%lld Codex sessions" = "%lld Codex sessions";
-"Watching %@" = "Watching %@";
-"Watching %@ and %@" = "Watching %@ and %@";
-"Documents agents write in .md gather here" = "Documents agents write in .md gather here";
 "No Document Open" = "No Document Open";
 "Choose one in the sidebar." = "Choose one in the sidebar.";
 "Open a document, or show the sidebar." = "Open a document, or show the sidebar.";
-"Welcome to Midam" = "Welcome to Midam";
-"Midam gathers the Markdown documents your coding agents write, by project, in the sidebar. Everything stays on this Mac." = "Midam gathers the Markdown documents your coding agents write, by project, in the sidebar. Everything stays on this Mac.";
-"Agents on this Mac" = "Agents on this Mac";
-"Not found" = "Not found";
 
 /* Sidebar: pins, search, unread filter, Add Project */
-"%lld selected" = "%lld selected";
-"Add Project" = "Add Project";
-"Add Project…" = "Add Project…";
 "All Projects" = "All Projects";
 "Pinned" = "Pinned";
 "Pin a project from its ⋯ menu" = "Pin a project from its ⋯ menu";
@@ -202,8 +187,6 @@
 "Open All in Tabs" = "Open All in Tabs";
 "Copy Path" = "Copy Path";
 "Path copied" = "Path copied";
-"Hide from List" = "Hide from List";
-"Hidden from the list. Settings brings it back." = "Hidden from the list. Settings brings it back.";
 "More Actions" = "More Actions";
 "Show Only Unread" = "Show Only Unread";
 "Showing only unread documents" = "Showing only unread documents";
@@ -216,20 +199,7 @@
 "No Matches" = "No Matches";
 "Nothing matches “%@”." = "Nothing matches “%@”.";
 "Search the sidebar (list focused)" = "Search the sidebar (list focused)";
-"No agent history found on this Mac yet." = "No agent history found on this Mac yet.";
-"Projects your agents worked on that are not in the sidebar. Midam gathers their documents from all of their history." = "Projects your agents worked on that are not in the sidebar. Midam gathers their documents from all of their history.";
-"Search Projects" = "Search Projects";
-"Looking through agent history…" = "Looking through agent history…";
-"Every project in your agents’ history is already in the sidebar." = "Every project in your agents’ history is already in the sidebar.";
-"No projects match “%@”." = "No projects match “%@”.";
-"Counting documents…" = "Counting documents…";
-"Hidden" = "Hidden";
 "Cancel" = "Cancel";
-"Projects added: %lld" = "Projects added: %lld";
-"Hidden Projects" = "Hidden Projects";
-"Projects you hide from the sidebar appear here." = "Projects you hide from the sidebar appear here.";
-"Show in Sidebar" = "Show in Sidebar";
-"Show %@ in Sidebar" = "Show %@ in Sidebar";
 
 /* The right panel: find, contents, shortcuts */
 "Panel" = "Panel";
@@ -371,3 +341,18 @@
 "It wants to change a file outside this project." = "It wants to change a file outside this project.";
 "It wants to work with files outside this project." = "It wants to work with files outside this project.";
 "It wants to use a connected service." = "It wants to use a connected service.";
+
+/* Sidebar: agents under projects */
+"Add Agent" = "Add Agent";
+"Add an agent to get started" = "Add an agent to get started";
+"Advanced" = "Advanced";
+"Remove Project…" = "Remove Project…";
+"Remove" = "Remove";
+"Remove “%@” from Midam?" = "Remove “%@” from Midam?";
+"Its folder and documents stay on this Mac. Add an agent in it to bring it back." = "Its folder and documents stay on this Mac. Add an agent in it to bring it back.";
+"Project removed" = "Project removed";
+"Working" = "Working";
+"Idle" = "Idle";
+"1 subagent" = "1 subagent";
+"%lld subagents" = "%lld subagents";
+"Context %lld%% full" = "Context %lld%% full";

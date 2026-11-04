@@ -49,7 +49,6 @@ struct MidamApp: App {
                 Divider()
                 Button("Clear Menu") { store.clearRecents() }.disabled(store.recents.isEmpty)
             }
-            Button("Add Project…") { AddProject.show() }
         }
         CommandGroup(replacing: .saveItem) {
             Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTab)

@@ -20,6 +20,8 @@ import SwiftUI
     @Published var items: [ChatItem] = []
     @Published var info: SessionInfo?
     @Published var draft = ""
+    /// A turn finished while another tab was in front: "done" until the tab is shown.
+    @Published var unseen = false
 
     init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil) {
         self.session = session
