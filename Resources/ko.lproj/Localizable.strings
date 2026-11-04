@@ -67,8 +67,6 @@
 "Reset to Defaults" = "기본값으로 되돌리기";
 "Body Font" = "본문 글꼴";
 "System Font" = "시스템 글꼴";
-"Change…" = "변경…";
-"More Settings…" = "설정 더 보기…";
 "General" = "일반";
 "Fonts" = "글꼴";
 "Search Fonts" = "글꼴 검색";
@@ -104,7 +102,6 @@
 "Tabs" = "탭";
 "Show Source" = "원문 보기";
 "Show Reading" = "읽기 보기";
-"Fonts and Size" = "글꼴과 크기";
 "Language" = "언어";
 "Applies after restart" = "다시 시작하면 적용돼요";
 "Restart Now" = "지금 다시 시작";
@@ -235,3 +232,17 @@
 "Projects you hide from the sidebar appear here." = "사이드바에서 숨긴 프로젝트가 여기 보여요.";
 "Show in Sidebar" = "사이드바에 보이기";
 "Show %@ in Sidebar" = "%@ 사이드바에 보이기";
+
+/* The right panel: find, contents, shortcuts */
+"Panel" = "패널";
+"Show Panel" = "패널 보기";
+"Hide Panel" = "패널 가리기";
+"Show · hide panel" = "패널 보기 · 가리기";
+"Contents" = "목차";
+"Shortcuts" = "단축키";
+"Find in Document" = "문서에서 찾기";
+"Type to find in this document." = "이 문서에서 찾을 말을 입력하세요.";
+"Matches" = "찾은 곳";
+"First %lld listed" = "처음 %lld개만 보여요";
+"Contents show in Reading view." = "목차는 읽기 보기에서 보여요.";
+"This document has no headings." = "이 문서에는 제목이 없어요.";

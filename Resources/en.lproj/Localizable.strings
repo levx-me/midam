@@ -66,8 +66,6 @@
 "Reset to Defaults" = "Reset to Defaults";
 "Body Font" = "Body Font";
 "System Font" = "System Font";
-"Change…" = "Change…";
-"More Settings…" = "More Settings…";
 "General" = "General";
 "Fonts" = "Fonts";
 "Search Fonts" = "Search Fonts";
@@ -102,7 +100,6 @@
 "Tabs" = "Tabs";
 "Show Source" = "Show Source";
 "Show Reading" = "Show Reading";
-"Fonts and Size" = "Font & Size";
 "Language" = "Language";
 "Applies after restart" = "Applies after restart";
 "Restart Now" = "Restart Now";
@@ -233,3 +230,17 @@
 "Projects you hide from the sidebar appear here." = "Projects you hide from the sidebar appear here.";
 "Show in Sidebar" = "Show in Sidebar";
 "Show %@ in Sidebar" = "Show %@ in Sidebar";
+
+/* The right panel: find, contents, shortcuts */
+"Panel" = "Panel";
+"Show Panel" = "Show Panel";
+"Hide Panel" = "Hide Panel";
+"Show · hide panel" = "Show · hide panel";
+"Contents" = "Contents";
+"Shortcuts" = "Shortcuts";
+"Find in Document" = "Find in Document";
+"Type to find in this document." = "Type to find in this document.";
+"Matches" = "Matches";
+"First %lld listed" = "First %lld listed";
+"Contents show in Reading view." = "Contents show in Reading view.";
+"This document has no headings." = "This document has no headings.";

@@ -16,6 +16,7 @@ extension KeyboardShortcut {
     static let findPrevious = KeyboardShortcut("g", modifiers: [.command, .shift])
     static let switchView = KeyboardShortcut("/")
     static let tableOfContents = KeyboardShortcut("t", modifiers: [.command, .option])
+    static let panel = KeyboardShortcut("i", modifiers: [.command, .option]) // the inspector's, as in Pages and Keynote
     static let shortcuts = KeyboardShortcut("'") // not ⌘?: macOS keeps that for Help search
     static let immersive = KeyboardShortcut("f", modifiers: [.command, .shift])
     static let reload = KeyboardShortcut("r")
@@ -101,6 +102,7 @@ struct ShortcutGroup {
         ShortcutGroup("View", [
             Shortcut("Show · hide sidebar", .sidebarSafari, .sidebar),
             Shortcut("Show Only Unread", .unreadOnly),
+            Shortcut("Show · hide panel", .panel),
             Shortcut("Reading ↔ Source", .switchView),
             Shortcut("Toggle Table of Contents", .tableOfContents),
             Shortcut("Immersive Mode", .immersive),
@@ -120,59 +122,47 @@ struct ShortcutGroup {
     ]
 }
 
-/// ⌘ at the end of the header's right capsule: the shortcuts help, as a popover like Aa's.
-/// Help > Keyboard Shortcuts opens the same one.
-struct ShortcutsButton: View {
-    @ObservedObject var store: Store
+/// The panel's Shortcuts tab (⌘', Help > Keyboard Shortcuts): every group in one column, what a
+/// key does at the left and its keys at the right.
+struct ShortcutsList: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        StripIcon(label: "Keyboard Shortcuts", keys: [.shortcuts], active: store.shortcutsShown, action: { store.shortcutsShown.toggle() }) {
-            Image(systemName: "command")
-        }
-        .popover(isPresented: $store.shortcutsShown, arrowEdge: .bottom) {
-            ShortcutsPopover().onExitCommand { store.shortcutsShown = false }
-        }
-    }
-}
-
-struct ShortcutsPopover: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: 28) {
-            column(Shortcuts.groups.prefix(2))
-            column(Shortcuts.groups.dropFirst(2))
-        }
-        .padding(18)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Keyboard Shortcuts")
-    }
-
-    private func column(_ groups: ArraySlice<ShortcutGroup>) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            ForEach(groups.indices, id: \.self) { g in
-                GridRow {
-                    Text(groups[g].title)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Shortcuts.groups.indices, id: \.self) { g in
+                    let group = Shortcuts.groups[g]
+                    Text(group.title)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, g == groups.startIndex ? 0 : 10)
-                        .gridCellColumns(2)
+                        .foregroundStyle(GlassLabel.style(strong: false, opaque: reduceTransparency))
+                        .padding(.top, g == 0 ? 0 : 14)
+                        .padding(.bottom, 4)
                         .accessibilityAddTraits(.isHeader)
-                }
-                ForEach(groups[g].items.indices, id: \.self) { i in
-                    let s = groups[g].items[i]
-                    GridRow {
-                        HStack(spacing: 4) {
-                            if let gesture = s.gesture {
-                                Text(gesture).font(.system(size: 12)).foregroundStyle(.secondary)
+                    ForEach(group.items.indices, id: \.self) { i in
+                        let s = group.items[i]
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(s.action)
+                                .font(.system(size: 12.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 3) {
+                                if let gesture = s.gesture {
+                                    Text(gesture).font(.system(size: 12)).foregroundStyle(GlassLabel.style(strong: false, opaque: reduceTransparency))
+                                }
+                                ForEach(s.keys, id: \.self) { KeyCap(glyph: $0) }
                             }
-                            ForEach(s.keys, id: \.self) { KeyCap(glyph: $0) }
+                            .fixedSize()
                         }
-                        Text(s.action).font(.system(size: 13))
+                        .padding(.vertical, 3)
+                        .accessibilityElement(children: .combine)
                     }
-                    .accessibilityElement(children: .combine)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
-        .fixedSize()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Keyboard Shortcuts")
     }
 }
 

@@ -613,7 +613,8 @@ struct Sidebar: View {
 }
 
 /// Native sidebar vibrancy, as in Mail and Finder; opaque under Reduce Transparency by itself.
-private struct SidebarMaterial: NSViewRepresentable {
+/// The docked right panel wears it too.
+struct SidebarMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let v = NSVisualEffectView()
         v.material = .sidebar
@@ -1318,13 +1319,15 @@ private struct WelcomeView: View {
 /// The sidebar with its edge: a hairline, and a strip that resizes it (width remembered).
 struct SidebarColumn: View {
     @ObservedObject var store: Store
-    @AppStorage("sidebarWidth") private var width = 260.0
+    @AppStorage(SidebarColumn.widthKey) private var width = SidebarColumn.defaultWidth
     @State private var start: Double?
+    static let widthKey = "sidebarWidth", defaultWidth = 260.0
     static let widths = 200.0...400.0
+    static func clamp(_ w: Double) -> Double { min(max(w, widths.lowerBound), widths.upperBound) }
 
     var body: some View {
         Sidebar(store: store)
-            .frame(width: min(max(width, Self.widths.lowerBound), Self.widths.upperBound))
+            .frame(width: Self.clamp(width))
             .overlay(alignment: .trailing) {
                 Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1).ignoresSafeArea()
             }
@@ -1338,7 +1341,7 @@ struct SidebarColumn: View {
                         .onChanged { v in
                             let from = start ?? width
                             start = from
-                            width = min(max(from + v.translation.width, Self.widths.lowerBound), Self.widths.upperBound)
+                            width = Self.clamp(from + v.translation.width)
                         }
                         .onEnded { _ in start = nil })
                     .accessibilityHidden(true)

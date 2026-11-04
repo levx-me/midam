@@ -384,7 +384,7 @@ enum RecommendedFonts {
 }
 
 /// The three presets of a spacing setting: a checkmarked submenu in the menu bar, a segmented
-/// control in Settings and the popover.
+/// control in Settings.
 struct PresetPicker: View {
     let spacing: Spacing
     @Binding var index: Int
@@ -610,78 +610,6 @@ struct ThemePreview: View {
             Divider()
             Button("Reset to Defaults") { Pref.reset() }
         }
-    }
-}
-
-// MARK: 'Aa' popover
-
-/// The quiet 'Aa' glyph in the title strip; its popover holds the frequent settings.
-struct FormatButton: View {
-    @Binding var shown: Bool
-
-    var body: some View {
-        // Latin "Aa" as text: the textformat symbol turns into 가가 under the Korean locale.
-        StripIcon(label: "Fonts and Size", active: shown, action: { shown.toggle() }) {
-            Text(verbatim: "Aa").font(.system(size: 14, weight: .medium)) // text runs larger than a symbol at the same size
-        }
-            .popover(isPresented: $shown, arrowEdge: .bottom) { FormatPopover(shown: $shown) }
-    }
-}
-
-struct FormatPopover: View {
-    @Binding var shown: Bool
-    @AppStorage(Pref.font) private var font = ""
-    @AppStorage(Pref.size) private var size = Knob.size.initial
-    @AppStorage(Pref.tracking) private var tracking = Spacing.normal
-    @AppStorage(Pref.leading) private var leading = Spacing.normal
-    @AppStorage(Pref.theme) private var theme = Theme.system.rawValue
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Form {
-                LabeledContent("Body Font") {
-                    HStack(spacing: 8) {
-                        Group {
-                            if font.isEmpty { Text("System Font") } else { Text(verbatim: Fonts.displayName(font)) }
-                        }
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        Spacer(minLength: 0)
-                        Button("Change…") { shown = false; SettingsRoute.showFonts() }
-                            .actionButton()
-                    }
-                }
-                LabeledContent("Text Size") {
-                    HStack(spacing: 6) {
-                        Button { size = Knob.size.clamp(size - 0.1) } label: { Image(systemName: "textformat.size.smaller") }
-                            .actionButton()
-                            .accessibilityLabel("Smaller").help("Smaller")
-                            .disabled(size <= Knob.size.range.lowerBound)
-                        Text(verbatim: Knob.size.format(size))
-                            .monospacedDigit()
-                            .frame(minWidth: 44)
-                            .accessibilityHidden(true)
-                        Button { size = Knob.size.clamp(size + 0.1) } label: { Image(systemName: "textformat.size.larger") }
-                            .actionButton()
-                            .accessibilityLabel("Bigger").help("Bigger")
-                            .disabled(size >= Knob.size.range.upperBound)
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityValue(Text(verbatim: Knob.size.format(size)))
-                }
-                PresetPicker(spacing: .tracking, index: $tracking).pickerStyle(.segmented)
-                PresetPicker(spacing: .leading, index: $leading).pickerStyle(.segmented)
-                AppearancePicker(theme: $theme).pickerStyle(.segmented)
-            }
-            .formStyle(.columns)
-            Divider()
-            Button("More Settings…") { shown = false; SettingsRoute.open() }
-                .buttonStyle(.link)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(16)
-        .frame(width: 340)
-        .tint(Color.accentColor)
     }
 }
 

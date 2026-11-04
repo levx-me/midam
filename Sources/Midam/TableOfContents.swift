@@ -1,54 +1,25 @@
 import SwiftUI
 
-/// The table of contents: a glass panel at the right, over the page (which never reflows for it).
-/// The header's toggle and View > Show Table of Contents (⌥⌘T) open and close it, for every tab,
-/// remembered across launches (Store.tocOpen). Hidden for a document without headings and in 원문.
-struct TableOfContents: View {
-    @ObservedObject var store: Store
+/// The table of contents, in the panel's Contents tab (⌥⌘T): the document's h1-h3, the section
+/// being read in ink and kept in view. It never opens by itself when a document opens.
+struct TocList: View {
     let page: Page
-    /// Where the panel starts: below the header, and below the find field while it shows.
-    let top: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    static let width: CGFloat = 260
-    private var available: Bool { page.tocAvailable }
-    private var shown: Bool { available && store.tocOpen }
 
     var body: some View {
-        panelArea
-            .padding(.top, top)
-            .padding(.trailing, 10) // under the header's right capsule
-            .padding(.bottom, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth, value: shown)
-    }
-
-    /// Liquid Glass materializes on macOS 26; before that the material slides in a little and fades.
-    /// Under Reduce Motion a plain fade (Reduce Transparency's opaque panel fades on 26 as well).
-    @ViewBuilder private var panelArea: some View {
-        if #available(macOS 26, *) {
-            GlassEffectContainer {
-                if shown { panel.glassEffectTransition(reduceMotion ? .identity : .materialize).transition(.opacity) }
-            }
-        } else if shown {
-            panel.transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(x: 16)))
-        }
-    }
-
-    private var panel: some View {
-        ScrollViewReader { proxy in
-            ViewThatFits(in: .vertical) {
-                list
+        if page.source {
+            PanelHint(text: Text("Contents show in Reading view."))
+        } else if page.outline.isEmpty {
+            PanelHint(text: Text("This document has no headings."))
+        } else {
+            ScrollViewReader { proxy in
                 ScrollView { list }
+                    .onChange(of: page.tocCurrent, initial: true) { _, anchor in
+                        if let i = page.outline.first(where: { $0.anchor == anchor })?.id { proxy.scrollTo(i) }
+                    }
             }
-            .onChange(of: page.tocCurrent, initial: true) { _, anchor in
-                if let i = page.outline.first(where: { $0.anchor == anchor })?.id { proxy.scrollTo(i) }
-            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Table of Contents")
         }
-        .glassPanel()
-        .onExitCommand { store.tocOpen = false } // Esc with focus in the panel
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Table of Contents")
     }
 
     private var list: some View {
@@ -59,10 +30,8 @@ struct TableOfContents: View {
                     .id(h.id)
             }
         }
-        .padding(.vertical, 6)
-        .frame(width: Self.width, alignment: .leading)
+        .padding(.bottom, 10)
     }
-
 }
 
 /// One heading: plain text, indented by level; the section being read in ink, the others faint
@@ -83,7 +52,7 @@ private struct TocRow: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 14 + CGFloat(indent) * 12)
+                .padding(.leading, 16 + CGFloat(indent) * 12)
                 .padding(.trailing, 14)
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
@@ -91,21 +60,5 @@ private struct TocRow: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityAddTraits(current ? .isSelected : [])
-    }
-}
-
-/// ☰ at the start of the header's right capsule: opens and closes the table of contents (the same
-/// state as ⌥⌘T). Ink while open; disabled without headings and in 원문.
-struct TocToggle: View {
-    @ObservedObject var store: Store
-    let page: Page
-
-    var body: some View {
-        let on = store.tocOpen && page.tocAvailable
-        StripIcon(label: "Table of Contents", tip: "Toggle Table of Contents", keys: [.tableOfContents], active: on,
-                  enabled: page.tocAvailable, action: { store.tocOpen.toggle() }) {
-            Image(systemName: "list.bullet.indent")
-        }
-        .accessibilityAddTraits(on ? [.isToggle, .isSelected] : .isToggle)
     }
 }

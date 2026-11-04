@@ -419,9 +419,7 @@ function midamFind(q, keep) {
   finds = [];
   if (q) {
     const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu");
-    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { // whichever view shows
-      acceptNode: n => (n.parentElement.checkVisibility() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
-    });
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, visibleText); // whichever view shows
     for (let n; (n = walk.nextNode()); ) {
       for (const m of n.data.matchAll(re)) {
         const r = new Range();
@@ -433,11 +431,17 @@ function midamFind(q, keep) {
   }
   // Start at the first match on screen; after a reload keep the same match number.
   current = !finds.length ? -1 : keep > 0 ? Math.min(keep, finds.length) - 1 : firstBelow(0) % finds.length;
-  return midamFindPaint(keep <= 0);
+  return { ...midamFindPaint(keep <= 0), matches: findList() };
 }
 
 function midamFindStep(d) {
   if (finds.length) current = (current + d + finds.length) % finds.length;
+  return midamFindPaint(true);
+}
+
+// A row of the app's find list was clicked: match i (0-based) becomes current, scrolled to.
+function midamFindGo(i) {
+  if (i >= 0 && i < finds.length) current = i;
   return midamFindPaint(true);
 }
 
@@ -447,7 +451,77 @@ function midamFindPaint(reveal) {
     const b = finds[current].getBoundingClientRect();
     if (reveal && (b.top < headerInset + 48 || b.bottom > innerHeight - 24)) scrollBy(0, b.top - innerHeight / 3);
   }
-  return [current + 1, finds.length];
+  return { index: current + 1, count: finds.length };
+}
+
+const visibleText = { acceptNode: n => (n.parentElement.checkVisibility() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) };
+
+// The app's find list: the first FIND_LIST matches, each {before, hit, after, path}: the line around
+// it (whitespace collapsed, about 80 characters, one line of code in a code block) and the texts of
+// the headings it sits under, outermost first. In 원문 the headings are the Markdown's # lines.
+const FIND_LIST = 500;
+function findList() {
+  const pre = document.documentElement.dataset.view === "source" && document.querySelector("body > #source");
+  let heads, after;
+  if (pre) { // positions as character offsets into the source
+    heads = sourceHeads(pre.textContent);
+    const starts = new Map();
+    let n = 0;
+    for (const w = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT); w.nextNode(); n += w.currentNode.data.length) starts.set(w.currentNode, n);
+    after = (head, r) => head.at <= starts.get(r.startContainer) + r.startOffset;
+  } else {
+    heads = [...document.querySelectorAll("body > #content :is(h1,h2,h3,h4,h5,h6)")]
+      .map(h => ({ h, level: Number(h.tagName[1]), text: outlineText(h) })).filter(x => x.text);
+    after = (head, r) => head.h.compareDocumentPosition(r.startContainer) & Node.DOCUMENT_POSITION_FOLLOWING;
+  }
+  const path = [];
+  let next = 0;
+  return finds.slice(0, FIND_LIST).map(r => {
+    for (; next < heads.length && after(heads[next], r); next++) {
+      while (path.length && path.at(-1).level >= heads[next].level) path.pop();
+      path.push(heads[next]);
+    }
+    return { ...around(r), path: path.map(x => x.text) };
+  });
+}
+
+// The # headings of Markdown source, outside code fences and front matter: {at (offset of the
+// line), level, text}. (highlight.js's own sections lose their way after a fence nested in a list.)
+function sourceHeads(text) {
+  const heads = [], front = /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text);
+  let at = front ? front[0].length : 0, fence = "";
+  for (const line of text.slice(at).split("\n")) {
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line), h = !fence && !f && /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (f && !fence) fence = f[1][0];
+    else if (f && f[1][0] === fence) fence = "";
+    const t = h ? h[2].replace(/\s+/g, " ").trim() : "";
+    if (t) heads.push({ at, level: h[1].length, text: Array.from(t).slice(0, 200).join("") });
+    at += line.length + 1;
+  }
+  return heads;
+}
+
+// The text either side of a match within its block, read from the text nodes next to it only as
+// far as needed (a long code block or table costs no more than a short paragraph).
+const blockOf = el => el.closest("p,li,dt,dd,td,th,h1,h2,h3,h4,h5,h6,pre,blockquote,figcaption,summary") || el;
+function around(r) {
+  const node = r.startContainer, block = blockOf(node.parentElement), code = block.tagName === "PRE";
+  const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, visibleText);
+  let before = node.data.slice(Math.max(0, r.startOffset - 200), r.startOffset), after = node.data.slice(r.endOffset, r.endOffset + 200);
+  walk.currentNode = node;
+  for (let t; before.length < 120 && !(code && before.includes("\n")) && (t = walk.previousNode()); ) before = t.data + before;
+  walk.currentNode = node;
+  for (let t; after.length < 120 && !(code && after.includes("\n")) && (t = walk.nextNode()); ) after += t.data;
+  if (code) { before = before.slice(before.lastIndexOf("\n") + 1); after = after.split("\n")[0]; }
+  const squash = s => s.replace(/\s+/g, " ");
+  const hit = squash(r.toString()).slice(0, 80);
+  before = squash(before).trimStart();
+  after = squash(after).trimEnd();
+  const rest = Math.max(30, 80 - hit.length); // what the line keeps either side, mostly after the match
+  const keepBefore = Math.min(before.length, Math.max(Math.floor(rest * 0.4), rest - after.length)), keepAfter = rest - keepBefore;
+  if (before.length > keepBefore) before = "…" + before.slice(-keepBefore).trimStart();
+  if (after.length > keepAfter) after = after.slice(0, keepAfter).trimEnd() + "…";
+  return { before, hit, after };
 }
 
 function midamFindClear() {

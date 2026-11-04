@@ -615,54 +615,68 @@ final class PageWebView: WKWebView {
 
     override func keyDown(with event: NSEvent) {
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return } // 🌐-F, Space, j/k reach the menu
-        // Esc with the page focused: find closes first (Page.close, via onExitCommand), else the open TOC.
+        // Esc with the page focused closes the panel while it floats over the page; a docked one stays.
         if event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty, // 53 = kVK_Escape
-           let page, !page.visible, page.tocAvailable, Store.shared.tocOpen {
-            Store.shared.tocOpen = false
+           Store.shared.panelOpen, Store.shared.panelFloats {
+            Store.shared.panelOpen = false
             return
         }
         super.keyDown(with: event)
     }
 }
 
-/// Per-window state and actions behind the menus; find matching itself runs in render.js.
+/// Per-tab state and actions behind the menus; find matching itself runs in render.js. Find is on
+/// while the panel shows its find tab (Store.findOn); each tab keeps its own query.
 @MainActor @Observable final class Page {
-    var visible = false
     var query = ""
+    /// The current match (1-based, 0 for none) and how many there are on the page.
     var index = 0
     var count = 0
+    /// The panel's find list: the first ≤500 matches, in page order.
+    var matches: [FindMatch] = []
     var focusRequest = 0
     /// Showing the raw Markdown instead of the reading view (per window, off by default).
     var source = false
     /// The table of contents: h1-h3 from the last render, and the anchor of the section being read.
     var outline: [Heading] = []
     var tocCurrent: String?
-    /// There is a table of contents to show: headings, in 읽기.
-    var tocAvailable: Bool { !source && !outline.isEmpty }
     @ObservationIgnored weak var webView: WKWebView?
     @ObservationIgnored var fileURL: URL?
     @ObservationIgnored var reload: (() -> Void)?
 
+    /// ⌘F, /: the panel on its find tab, the field focused.
     func show() {
-        visible = true
-        focusRequest += 1
-        search()
+        Store.shared.show(.find)
+        focusField()
     }
 
-    func close() {
-        visible = false
+    /// The find field takes focus, on the next turn: the panel may only now be opening.
+    func focusField() { Task { self.focusRequest += 1 } }
+
+    /// Esc in the find field: back to the page; the panel and the matches stay.
+    func leaveField() {
         Store.shared.findFocused = false
-        run("midamFindClear()")
         if let webView { Sidebar.pageTakesFocus(webView) }
     }
 
+    /// Find turned off (the panel closed or on another tab): no match stays painted.
+    func clearFind() {
+        index = 0
+        count = 0
+        matches = []
+        run("midamFindClear()")
+    }
+
     func search() { run("return midamFind(q, 0)", ["q": query]) }
-    func refresh() { if visible { run("return midamFind(q, k)", ["q": query, "k": index]) } }
+    func refresh() { if Store.shared.findOn { run("return midamFind(q, k)", ["q": query, "k": index]) } }
 
     func step(_ d: Int) {
-        guard visible else { return show() }
+        guard Store.shared.findOn else { return show() }
         run("return midamFindStep(d)", ["d": d])
     }
+
+    /// A row of the find list: that match becomes the current one, scrolled to.
+    func go(to match: FindMatch) { run("return midamFindGo(i)", ["i": match.id]) }
 
     enum Scroll: String {
         // Smooth unless Reduce Motion is on, as the page keys: WebKit's smooth scroll caps its own
@@ -727,10 +741,11 @@ final class PageWebView: WKWebView {
 
     private func run(_ js: String, _ args: [String: Any] = [:]) {
         webView?.callAsyncJavaScript(js, arguments: args, in: nil, in: world) { [weak self] result in
-            guard let self, case .success(let value) = result, let r = value as? [Int], r.count == 2 else { return }
-            (self.index, self.count) = (r[0], r[1])
-            if self.visible, !self.query.isEmpty {
-                AccessibilityNotification.Announcement(r[1] == 0 ? String(localized: "No matches") : String(localized: "\(r[0]) of \(r[1])")).post()
+            guard let self, case .success(let value) = result, let r = FindMatch.result(value) else { return }
+            (self.index, self.count) = (r.index, r.count)
+            if let matches = r.matches { self.matches = matches }
+            if Store.shared.findOn, !self.query.isEmpty, self === Store.shared.current?.page {
+                AccessibilityNotification.Announcement(r.count == 0 ? String(localized: "No matches") : String(localized: "\(r.index) of \(r.count)")).post()
             }
         }
     }

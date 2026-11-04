@@ -56,16 +56,41 @@ import UniformTypeIdentifiers
     /// In immersive mode the row is gone: a window keeps the title bar (the lights are there),
     /// full screen starts at the top.
     var header: CGFloat { fullScreen ? (immersive ? 0 : 6 + TitleStrip.capsule + 6) : titlebar }
-    /// Where the find field and the contents panel start: below the capsules (also while they
+    /// Where the panel starts while it floats over the page: below the capsules (also while they
     /// slide down with the menu bar), or on the row's own line when it is hidden.
     var overlayTop: CGFloat { immersive ? rowTop : rowTop + TitleStrip.capsule + 8 }
     /// Back and forward through the places read (⌘[ ⌘]), in memory only.
     @Published private(set) var history = NavHistory<Spot>()
-    /// View > Show Table of Contents (⌥⌘T): the panel stays open, for every tab, until turned off.
-    @Published var tocOpen = UserDefaults.standard.bool(forKey: Store.tocKey) {
-        didSet { UserDefaults.standard.set(tocOpen, forKey: Self.tocKey) }
+    /// View > Show Panel (⌥⌘I): the right panel (find, contents, shortcuts), for every tab, on until
+    /// turned off, remembered with its last tab.
+    @Published var panelOpen = UserDefaults.standard.bool(forKey: Store.panelKey) {
+        didSet { UserDefaults.standard.set(panelOpen, forKey: Self.panelKey); findTurned(oldValue && panelTab == .find) }
     }
-    private static let tocKey = "tocOpen"
+    @Published var panelTab = PanelTab(rawValue: UserDefaults.standard.string(forKey: Store.panelTabKey) ?? "") ?? .find {
+        didSet { UserDefaults.standard.set(panelTab.rawValue, forKey: Self.panelTabKey); findTurned(panelOpen && oldValue == .find) }
+    }
+    private static let panelKey = "panelOpen", panelTabKey = "panelTab"
+    /// The panel floats over the page's right edge: docking it would leave the page too narrow.
+    /// Set by ReaderView as the window's width changes.
+    var panelFloats = false
+    /// Find is on while the panel shows its find tab: every page paints its own query's matches.
+    var findOn: Bool { panelOpen && panelTab == .find }
+
+    /// The panel open on `tab`; the same key again closes it (⌥⌘T, ⌘').
+    func togglePanel(_ tab: PanelTab) {
+        if panelOpen, panelTab == tab { panelOpen = false } else { show(tab) }
+    }
+
+    func show(_ tab: PanelTab) {
+        panelTab = tab
+        panelOpen = true
+    }
+
+    /// Find turned on or off: each page shown so far paints its matches again, or clears them.
+    private func findTurned(_ was: Bool) {
+        guard was != findOn else { return }
+        for f in files where f.shown { findOn ? f.page.refresh() : f.page.clearFind() }
+    }
     /// View > Immersive Mode (⇧⌘F): the header row hidden, app-wide, remembered across launches.
     @Published var immersive = UserDefaults.standard.bool(forKey: Store.immersiveKey) {
         didSet { UserDefaults.standard.set(immersive, forKey: Self.immersiveKey) }
@@ -82,8 +107,6 @@ import UniformTypeIdentifiers
                                          .halfPageDown, .halfPageUp, .halfPageUpE, .vimPageDown, .vimPageUp,
                                          .findSlash, .closeTabX]
                                          .map { String($0.key.character).lowercased() })
-    /// The keyboard shortcuts popover (the header's ⌘ button, Help > Keyboard Shortcuts).
-    @Published var shortcutsShown = false
     /// The find field has focus: single-key Go shortcuts (Space, j, k, g, G) stand down.
     @Published var findFocused = false
     @Published private(set) var recents: [URL] = NSDocumentController.shared.recentDocumentURLs
@@ -475,23 +498,41 @@ struct ReaderView: View {
     /// so a dark theme never flashes Midam's paper first.
     private var ground: NSColor { theme.color("bg") }
 
+    @AppStorage(PanelColumn.widthKey) private var panelWidth = PanelColumn.defaultWidth
+    @AppStorage(SidebarColumn.widthKey) private var sidebarWidth = SidebarColumn.defaultWidth
+    /// The page's narrowest: below it the panel floats over the page instead of docking.
+    private static let minPage: CGFloat = 420
+
     var body: some View {
         let reading = Reading(font: font, mono: codeFont, size: size,
                               tracking: Spacing.tracking.value(tracking), leading: Spacing.leading.value(leading),
                               paragraph: Spacing.paragraph.value(paragraph), measure: Spacing.measure.value(measure),
                               header: store.header)
         let page = store.current?.page
-        // The sidebar at the left, under the traffic lights; the header, contents and find float
-        // over the page beside it.
-        HStack(spacing: 0) {
-            if store.sidebarOpen {
-                SidebarColumn(store: store)
-                    .transition(.move(edge: .leading))
-                    .zIndex(1) // its resize strip reaches over the page's edge
+        let side = store.sidebarOpen ? SidebarColumn.clamp(sidebarWidth) : 0
+        // The sidebar at the left, under the traffic lights, the panel at the right; the header
+        // floats over the page between them. The page's place in the row never changes, so its
+        // web views stay as the panel docks or floats.
+        GeometryReader { window in
+            let floats = window.size.width - side - PanelColumn.clamp(panelWidth) < Self.minPage
+            HStack(spacing: 0) {
+                if store.sidebarOpen {
+                    SidebarColumn(store: store)
+                        .transition(.move(edge: .leading))
+                        .zIndex(1) // its resize strip reaches over the page's edge
+                }
+                content(reading: reading, page: page, floats: floats)
+                if store.panelOpen, !floats {
+                    PanelColumn(store: store)
+                        .transition(.move(edge: .trailing))
+                        .zIndex(1) // its resize strip reaches over the page's edge
+                }
             }
-            content(reading: reading, page: page)
+            .onChange(of: floats, initial: true) { store.panelFloats = floats }
         }
+        .frame(minWidth: side + Self.minPage, minHeight: 320) // the window's narrowest: the panel can float
         .animation(reduceMotion ? nil : .smooth, value: store.sidebarOpen)
+        .animation(reduceMotion ? nil : .smooth, value: store.panelOpen)
         .overlay { TipLayer() }
         .coordinateSpace(.named(Tips.space))
         // The page runs to the top of the window and scrolls under the floating capsules;
@@ -499,11 +540,10 @@ struct ReaderView: View {
         .ignoresSafeArea(.container, edges: .top)
         .background(Color(nsColor: ground).ignoresSafeArea())
         .onChange(of: ground, initial: true) { store.setWindowGround(ground) }
-        .onExitCommand { if let page, page.visible { page.close() } } // Esc with focus in the page
         .tint(Color.accentColor)
     }
 
-    private func content(reading: Reading, page: Page?) -> some View {
+    private func content(reading: Reading, page: Page?, floats: Bool) -> some View {
         ZStack {
             ForEach(store.files.filter(\.shown)) { f in
                 MarkdownView(text: f.text, stamp: f.stamp, fileURL: f.url, reading: reading, page: f.page, active: f.id == store.selected)
@@ -513,32 +553,17 @@ struct ReaderView: View {
                     .padding(.top, store.header)
             }
         }
-        .frame(minWidth: 420, minHeight: 320)
-        // The header first: in immersive mode the panel moves up into its place, above its
-        // window-drag strip, and below the search capsule while that shows.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .top) {
-            TitleStrip(store: store)
+            TitleStrip(store: store, panelDocked: store.panelOpen && !floats)
         }
         .overlay {
-            if let page {
-                let search = store.immersive && page.visible ? TitleStrip.capsule + 8 : 0
-                TableOfContents(store: store, page: page, top: store.overlayTop + search)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            // Immersive mode: find shows alone where the header's right capsule would be.
-            if store.immersive, let page, page.visible {
-                Search(page: page)
-                    .padding(.horizontal, 3)
-                    .frame(height: TitleStrip.capsule)
-                    .glassCapsule()
-                    .padding(.top, store.rowTop)
-                    .padding(.trailing, 10)
-                    .transition(.opacity.combined(with: .offset(y: -8)))
+            if store.panelOpen, floats {
+                FloatingPanel(store: store)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(x: 16)))
             }
         }
         .animation(reduceMotion ? nil : .smooth, value: store.immersive) // the header's fade, the panel moving up
-        .animation(reduceMotion ? nil : .smooth, value: page?.visible) // the search capsule growing or showing
     }
 }
 
@@ -550,11 +575,11 @@ final class ReaderHost: NSHostingView<ReaderView> {
 }
 
 /// The header: a row of floating glass over the page, on the traffic lights' line in a window:
-/// the sidebar button (as Safari's) while the sidebar is hidden, ‹ › (back, forward), the tabs' capsule with a round + (Open…) hugging it, and at the right the
-/// view toggle and 'Aa'. Empty space in the header drags the window.
+/// the sidebar button (as Safari's) while the sidebar is hidden, ‹ › (back, forward), the tabs' capsule, and at the right the
+/// source button and the panel button (in the panel's own strip while it is docked). Empty space in the header drags the window.
 struct TitleStrip: View {
     @ObservedObject var store: Store
-    @State private var formatShown = false
+    let panelDocked: Bool
     @Namespace private var glass
 
     /// The capsules' height: centred on the lights' line (16 pt down), 26 pt leaves 3 pt above
@@ -585,36 +610,26 @@ struct TitleStrip: View {
                 TabStrip(store: store)
                     .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
             }
-            // Its own glass circle after the last tab: when the tabs overflow it stays at the
-            // capsule's end and only they scroll.
-            StripIcon(label: "Open…", keys: [.open], action: { store.showOpenPanel() }) {
-                Image(systemName: "plus")
-            }
-            .frame(width: Self.capsule, height: Self.capsule)
-            .glassCapsule()
-            .fixedSize()
             Spacer(minLength: 0)
-            if let page = store.current?.page {
+            let page = store.current?.page
+            if page != nil || !panelDocked {
+                let both = page != nil && !panelDocked
                 let tools = HStack(spacing: 0) {
-                    Search(page: page, field: !store.immersive) // in immersive mode the window's own one
-                    TocToggle(store: store, page: page)
-                    ViewToggle(page: page)
-                    FormatButton(shown: $formatShown)
-                    ShortcutsButton(store: store)
+                    if let page { SourceToggle(page: page) }
+                    if !panelDocked { PanelToggle(store: store) }
                 }
-                .padding(.horizontal, 3)
-                .frame(height: Self.capsule)
+                .padding(.horizontal, both ? 3 : 0)
+                .frame(width: both ? nil : Self.capsule, height: Self.capsule) // alone: a circle
                 .glassCapsule()
-                .layoutPriority(2) // room for the search field before the tabs, which scroll instead
+                .fixedSize()
                 if #available(macOS 26, *) {
-                    GlassEffectContainer { tools.glassEffectID("tools", in: glass) } // the glass morphs as it grows
+                    GlassEffectContainer { tools.glassEffectID("tools", in: glass) } // the glass morphs as it changes
                 } else {
                     tools
                 }
             }
         }
-        // Immersive mode: faded out and out of reach, but kept in place, so the ⌘ popover
-        // (Help > Keyboard Shortcuts) still opens at the top right. The drag strip stays.
+        // Immersive mode: faded out and out of reach, but kept in place. The drag strip stays.
         .opacity(store.immersive ? 0 : 1)
         .allowsHitTesting(!store.immersive)
         .accessibilityHidden(store.immersive)

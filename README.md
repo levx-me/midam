@@ -17,6 +17,7 @@
 - Liquid Glass header
 - Colour themes from 10 families (Catppuccin, Gruvbox, Nord, Tokyo Night, Rosé Pine, Everforest, Kanagawa, One, Solarized, GitHub; Nord is dark-only) plus the monochrome Midam theme, chosen separately for light and dark
 - Back / forward through links, anchors and tab switches
+- A right panel beside the page: find in the document (every match listed with its heading path), the table of contents, and the keyboard shortcuts
 - Reading settings and bundled fonts
 - English and Korean
 
@@ -66,10 +67,11 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | ⌘1–9 | Go to tab (⌘9: last tab) |
 | ⌘[ / ⌘], two-finger swipe | Back / forward |
 | ⌃Tab / ⌃⇧Tab, ⇧⌘[ / ⇧⌘] | Next / previous tab; ⇧⌘[ previous, ⇧⌘] next |
-| ⌘F or / , ⌘G / ⇧⌘G | Find (the 🔍 button in the header) / next / previous (Esc closes) |
+| ⌘F or / , ⌘G / ⇧⌘G | Find: the panel's Find tab, every match listed / next / previous (Esc back to the page) |
 | ⌘+ / ⌘− / ⌘0 | Text size larger / smaller / default |
-| ⌘/ | Toggle Reading / Source |
-| ⌥⌘T | Toggle the table of contents (also the ☰ button in the header) |
+| ⌘/ | Toggle Reading / Source (also the </> button in the header) |
+| ⌥⌘I | Show / hide the right panel (also the panel button at the header's right) |
+| ⌥⌘T | The panel's Contents tab (again: hide the panel) |
 | ⇧⌘L or ⌃⌘S | Show / hide the sidebar (also the sidebar button in the header) |
 | ⇧⌘F | Immersive mode: hide the header |
 | ⌘R | Reload |
@@ -80,7 +82,7 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | d / u (or e), f / b | Half page down / up, full page down / up (Vimium style) |
 | ⌘, | Settings |
 
-Press ⌘' (or the ⌘ button in the header, or Help › Keyboard Shortcuts) to see this list in the app.
+Press ⌘' (or Help › Keyboard Shortcuts) to see this list in the panel's Shortcuts tab. Fonts and text size live in Settings (⌘,) and the Format menu.
 
 ## Third-party credits
 

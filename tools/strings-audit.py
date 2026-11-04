@@ -19,7 +19,8 @@ for a, b in re.findall(r'label: [\w.]+ \? ' + lit + r' : ' + lit, src):
     keys |= {a, b}
 # Interpolated keys become format keys.
 fmt = {r"Tab \(n)": "Tab %lld", r"\(page.index) of \(page.count) matches": "%lld of %lld matches",
-       r"\(r[0]) of \(r[1])": "%lld of %lld",
+       r"\(r.index) of \(r.count)": "%lld of %lld", r"\(page.index) of \(page.count)": "%lld of %lld",
+       r"First \(page.matches.count) listed": "First %lld listed",
        r"\(other) in All Fonts": "%lld in All Fonts", r"\(other) in Recommended": "%lld in Recommended"}
 keys = {fmt.get(k, k) for k in keys if k}
 def strings(lang):

@@ -248,7 +248,7 @@ const read = f => fs.readFileSync(R + f, "utf8");
     };
     const steps = [];
     for (const q of ["d", "de", "dep"]) {
-      const [index, count] = midamFind(q, 0);
+      const { index, count } = midamFind(q, 0);
       const layers = document.querySelectorAll("html > .midam-find").length;
       const boxes = document.querySelectorAll("html > .midam-find > div").length;
       steps.push({ q, index, count, layers, boxes, all: finds.every(r => r.toString().toLowerCase() === q), on: onText() });
@@ -284,7 +284,39 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("find in a long page: boxes only near the window, drawn where it scrolls", f.band.few > 0 && f.band.few < f.band.count / 2 && f.band.last, f.band);
   check("find closed: no box, layer or mark left", f.left === 0 && f.highlights === 0, f);
 
+  // 8. The find list: the line around each match, its heading path, code lines, 원문, the cap, a jump.
+  const L = await page.evaluate(async () => {
+    const long = "word ".repeat(40);
+    await midamRender("---\ntitle: t\n# a YAML comment\n---\n\n# Setup\n\n" + long + "deposit " + long + "\n\n## Install\n\nRun   the\n  deposit\tnow.\n\n" +
+      "### Deep\n\nA **deposit** here.\n\n## Use\n\n```js\n# not a heading\nlet deposit = 2; // here\nnext();\n```\n\n# Other\n\n- one deposit item", "", {});
+    midamSetView(false);
+    const r = midamFind("deposit", 0);
+    const go = midamFindGo(3), at = current, stepped = midamFindStep(1);
+    midamSetView(true);
+    const src = midamFind("deposit", 0);
+    midamSetView(false);
+    await midamRender(Array.from({ length: 700 }, (_, i) => "Deposit " + i + ".").join("\n\n"), "", {});
+    const many = midamFind("deposit", 0);
+    midamFindClear();
+    return { r, go, at, stepped, src: src.matches.map(m => m.path.join(" › ") + " | " + m.before + "[" + m.hit + "]" + m.after),
+      many: [many.count, many.matches.length, many.matches[699 - 200]?.hit] };
+  });
+  const hit = i => L.r.matches[i] ?? {};
+  check("find list: one row per match with index and count", L.r.count === 5 && L.r.matches.length === 5 && L.r.index >= 1, L.r);
+  check("find list: heading paths follow the nesting", JSON.stringify(L.r.matches.map(m => m.path)) ===
+    '[["Setup"],["Setup","Install"],["Setup","Install","Deep"],["Setup","Use"],["Other"]]', L.r.matches.map(m => m.path));
+  check("find list: a long line is cut to about 80 characters around the match, with ellipses",
+    hit(0).hit === "deposit" && hit(0).before.startsWith("…") && hit(0).after.endsWith("…") && (hit(0).before + hit(0).hit + hit(0).after).length <= 84, hit(0));
+  check("find list: whitespace collapsed", hit(1).before === "Run the " && hit(1).after === " now.", hit(1));
+  check("find list: across inline markup, the block's text", hit(2).before === "A " && hit(2).after === " here.", hit(2));
+  check("find list: one line of a code block", hit(3).before === "let " && hit(3).after === " = 2; // here", hit(3));
+  check("find list: a list item", hit(4).before === "one " && hit(4).after === " item", hit(4));
+  check("find go: the clicked match becomes current; a step goes on from it", L.go.index === 4 && L.at === 3 && L.stepped.index === 5 && !("matches" in L.go), L);
+  check("find list in 원문: paths from the # lines (not in fences or front matter), lines from the source",
+    L.src.length === 5 && L.src[1] === "Setup › Install | [deposit] now." && L.src[3].startsWith("Setup › Use | let [deposit] = 2;"), L.src);
+  check("find list: capped at 500, the count is every match", L.many[0] === 700 && L.many[1] === 500 && L.many[2] === "Deposit", L.many);
+
   await browser.close();
-  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find boxes)`);
+  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find boxes, find list)`);
   process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("FAILED", e); process.exit(1); });

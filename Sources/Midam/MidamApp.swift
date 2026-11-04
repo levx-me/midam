@@ -26,7 +26,7 @@ struct MidamApp: App {
     private var page: Page? { store.current?.page }
 
     /// ⌘F searches the sidebar while its list or its search field has focus (or no page is
-    /// open), else finds in the page.
+    /// open), else finds in the page: the panel on its find tab.
     private func find() {
         let inSidebar = sidebar.searchFieldFocused || (NSApp.keyWindow.map(Sidebar.hasFocus) ?? false)
         if inSidebar || page == nil {
@@ -87,8 +87,15 @@ struct MidamApp: App {
             .disabled(page == nil)
             Button("Switch Reading/Source") { if let page { page.setView(source: !page.source) } }
                 .keyboardShortcut(.switchView).disabled(page == nil)
-            Toggle("Show Table of Contents", isOn: $store.tocOpen)
-                .keyboardShortcut(.tableOfContents).disabled(!(page?.tocAvailable ?? false))
+            // ⌥⌘I as the inspector in Pages and Keynote; ⌥⌘T and ⌘' open it on their tab, or close it there.
+            if store.panelOpen {
+                Button("Hide Panel") { store.panelOpen = false }.keyboardShortcut(.panel)
+            } else {
+                Button("Show Panel") { store.panelOpen = true }.keyboardShortcut(.panel)
+            }
+            Toggle("Show Table of Contents", isOn: Binding(get: { store.panelOpen && store.panelTab == .toc },
+                                                           set: { _ in store.togglePanel(.toc) }))
+                .keyboardShortcut(.tableOfContents)
             // A menu item, so PageWebView hands ⇧⌘F to the menu before WKWebView sees it.
             Toggle("Immersive Mode", isOn: $store.immersive).keyboardShortcut(.immersive)
             Divider()
@@ -130,8 +137,7 @@ struct MidamApp: App {
             }
         }
         CommandGroup(replacing: .help) {
-            Button("Keyboard Shortcuts") { store.shortcutsShown.toggle() }
-                .keyboardShortcut(.shortcuts).disabled(store.current == nil)
+            Button("Keyboard Shortcuts") { store.togglePanel(.shortcuts) }.keyboardShortcut(.shortcuts)
         }
     }
 
@@ -180,68 +186,23 @@ struct StripIcon<Glyph: View>: View {
     }
 }
 
-/// 읽기 ↔ 원문, as ⌘/. The glyph shows where a click takes you: </> in 읽기, a page in 원문.
-struct ViewToggle: View {
+/// 원문 보기 (⌘/): the raw Markdown or the reading view, its </> in the accent colour on a soft
+/// disc while the source shows.
+struct SourceToggle: View {
     let page: Page
 
     var body: some View {
-        StripIcon(label: page.source ? "Show Reading" : "Show Source", keys: [.switchView], action: { page.setView(source: !page.source) }) {
-            Image(systemName: page.source ? "doc.text" : "chevron.left.forwardslash.chevron.right")
-        }
-    }
-}
-
-/// Find at the start of the right capsule: a magnifying glass that grows leftward into the field
-/// (⌘F, /, or a click), the glass staying at its left edge as the field's icon. Esc folds it back.
-struct Search: View {
-    let page: Page
-    var field = true
-
-    var body: some View {
-        HStack(spacing: 0) {
-            StripIcon(label: "Find", keys: [.find, .findSlash], active: page.visible, action: { page.show() }) {
-                Image(systemName: "magnifyingglass")
-            }
-            if field, page.visible { FindField(page: page).transition(.opacity) }
-        }
-    }
-}
-
-/// The search field inside the capsule, with the match count at its right.
-struct FindField: View {
-    @Bindable var page: Page
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            TextField("Find", text: $page.query)
-                .textFieldStyle(.plain)
-                .frame(minWidth: 90, idealWidth: 180, maxWidth: 180)
-                .focused($focused)
-                .onSubmit { page.step(NSApp.currentEvent?.modifierFlags.contains(.shift) == true ? -1 : 1) }
-                .onExitCommand { page.close() }
-                .onChange(of: page.query) { page.search() }
-            Text(verbatim: page.query.isEmpty ? "" : "\(page.index)/\(page.count)")
-                .monospacedDigit()
-                .foregroundStyle(Color(nsColor: .muted))
-                .accessibilityLabel("\(page.index) of \(page.count) matches")
-                .fastTip(Text(verbatim: "\(page.index)/\(page.count) — ") + Text("Next") + Text(verbatim: " \(KeyboardShortcut.findNext.glyph) · ")
-                      + Text("Previous") + Text(verbatim: " \(KeyboardShortcut.findPrevious.glyph)"))
-        }
-        .font(.system(size: 13))
-        .padding(.trailing, 9)
-        .onAppear { focused = true }
-        .onChange(of: page.focusRequest) { focused = true }
-        .onChange(of: focused) {
-            Store.shared.findFocused = focused
-            // A click elsewhere folds an empty field; one with a query stays. Next turn, so a field
-            // taking over (immersive mode switched) has claimed focus by then.
-            if !focused {
-                DispatchQueue.main.async { [page] in
-                    if page.visible, page.query.isEmpty, !Store.shared.findFocused { page.close() }
-                }
+        StripIcon(label: page.source ? "Show Reading" : "Show Source", keys: [.switchView], active: page.source,
+                  action: { page.setView(source: !page.source) }) {
+            let glyph = Image(systemName: "chevron.left.forwardslash.chevron.right")
+            if page.source {
+                glyph.foregroundStyle(Color.accentColor)
+                    .background(Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 24, height: 24))
+            } else {
+                glyph
             }
         }
+        .accessibilityAddTraits(page.source ? [.isToggle, .isSelected] : .isToggle)
     }
 }
 

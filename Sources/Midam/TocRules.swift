@@ -36,3 +36,28 @@ struct Heading: Identifiable, Equatable {
         return id
     }
 }
+
+/// One row of the find list, as render.js reports it: the line around the match, split at the
+/// match, and the headings it sits under. Plain text, bounded.
+struct FindMatch: Identifiable, Equatable {
+    let id: Int // the match's position in the page, 0-based (midamFindGo takes it)
+    let before: String
+    let hit: String
+    let after: String
+    let path: [String]
+
+    /// A find call's result, {index, count, matches?}: index is the current match (1-based, 0 for
+    /// none), count every match on the page, matches the first ≤500 of them (absent after a step or
+    /// a jump, which leave the list as it was). Nil when it is not one.
+    static func result(_ value: Any?) -> (index: Int, count: Int, matches: [FindMatch]?)? {
+        guard let d = value as? [String: Any], let index = d["index"] as? Int, let count = d["count"] as? Int,
+              count >= 0, (0...count).contains(index) else { return nil }
+        guard let list = d["matches"] as? [[String: Any]] else { return (index, count, nil) }
+        let text = { (v: Any?, n: Int) in String((v as? String ?? "").prefix(n)) }
+        let matches = list.prefix(500).enumerated().map { i, m in
+            FindMatch(id: i, before: text(m["before"], 200), hit: text(m["hit"], 200), after: text(m["after"], 200),
+                      path: ((m["path"] as? [Any]) ?? []).prefix(6).map { text($0, 200) }.filter { !$0.isEmpty })
+        }
+        return (index, count, matches)
+    }
+}
