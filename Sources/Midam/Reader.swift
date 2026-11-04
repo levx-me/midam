@@ -599,9 +599,9 @@ struct TitleStrip: View {
     @ObservedObject var store: Store
     let panelDocked: Bool
 
-    /// The capsules' height: centred on the lights' line (16 pt down), 26 pt leaves 3 pt above
-    /// them. Labels and the 28 pt icon targets keep their size.
-    static let capsule: CGFloat = 26
+    /// The capsules' height, a standard toolbar control's: centred on the lights' line (16 pt
+    /// down), 30 pt leaves 1 pt above them and room around the 28 pt icon targets.
+    static let capsule: CGFloat = 30
 
     var body: some View {
         HStack(spacing: 8) {
@@ -619,7 +619,7 @@ struct TitleStrip: View {
                     Image(systemName: "chevron.right")
                 }
             }
-            .padding(.horizontal, 3)
+            .padding(.horizontal, 4)
             .frame(height: Self.capsule)
             .glassCapsule()
             .fixedSize()
@@ -751,7 +751,7 @@ struct TabStrip: View {
         HStack(spacing: 0) {
             ForEach(store.files) { FileTab(file: $0, store: store).id($0.id) }
         }
-        .padding(.horizontal, 3)
+        .padding(.horizontal, 4)
     }
 }
 
@@ -778,15 +778,15 @@ struct FileTab: View {
         Button { store.select(file) } label: {
             HStack(spacing: 4) {
                 Text(verbatim: file.url.lastPathComponent)
-                    .font(.system(size: 14, weight: on ? .medium : .regular))
+                    .font(.system(size: 13, weight: on ? .medium : .regular))
                     .foregroundStyle(GlassLabel.style(strong: on, opaque: reduceTransparency))
                     .lineLimit(1)
                 if file.page.changes > 0 { ChangeChip(n: file.page.changes) }
                 Color.clear.frame(width: 20, height: 20) // room for the ×
             }
-            .padding(.leading, 11)
+            .padding(.leading, 12)
             .padding(.trailing, 3)
-            .frame(height: TitleStrip.capsule - 4)
+            .frame(height: TitleStrip.capsule - 8) // 4 pt of glass around the current tab's pill
             .background(Color.primary.opacity(on ? 0.09 : 0), in: Capsule())
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: on)
             .contentShape(Rectangle())

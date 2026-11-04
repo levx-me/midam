@@ -173,7 +173,7 @@ struct StripIcon<Glyph: View>: View {
         let glyphs = keys.map(\.glyph).joined(separator: ", ")
         Button(action: action) {
             glyph()
-                .font(.system(size: 15)) // optically matches the 14 pt tab names
+                .font(.system(size: 14)) // a little over the 13 pt tab names, as toolbar glyphs are
                 .foregroundStyle(GlassLabel.style(strong: on && (hover || active), opaque: reduceTransparency))
                 .opacity(on ? 1 : 0.35) // disabled (nowhere to go back to): fainter still
                 .frame(width: 28, height: 28)
