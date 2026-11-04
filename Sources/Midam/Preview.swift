@@ -24,7 +24,7 @@ import WebKit
         w.navigationDelegate = self
         w.uiDelegate = self
         w.allowsBackForwardNavigationGestures = true
-        w.load(URLRequest(url: url))
+        if PreviewDetector.isLocal(url) { w.load(URLRequest(url: url)) } // a restored address may be anything
         web = w
         return w
     }
@@ -43,16 +43,23 @@ import WebKit
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        guard let to = action.request.url, action.targetFrame?.isMainFrame != false, !PreviewDetector.isLocal(to) else { return .allow }
-        NSWorkspace.shared.open(to)
-        return .cancel
+        guard let to = action.request.url, action.targetFrame?.isMainFrame != false else { return .allow }
+        switch PreviewDetector.navigation(to: to, clicked: action.navigationType == .linkActivated) {
+        case .stay: return .allow
+        case .openExternally: NSWorkspace.shared.open(to); return .cancel
+        case .cancel: return .cancel
+        }
     }
 
     // target="_blank": local pages open here, others in the browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let to = action.request.url else { return nil }
-        if PreviewDetector.isLocal(to) { webView.load(URLRequest(url: to)) } else { NSWorkspace.shared.open(to) }
+        switch PreviewDetector.navigation(to: to, clicked: action.navigationType == .linkActivated) {
+        case .stay: webView.load(URLRequest(url: to))
+        case .openExternally: NSWorkspace.shared.open(to)
+        case .cancel: break
+        }
         return nil
     }
 

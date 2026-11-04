@@ -45,4 +45,15 @@ enum PreviewDetector {
         return ["http", "https", "ws", "wss"].contains(scheme)
             && ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].contains(url.host?.lowercased() ?? "")
     }
+
+    enum Navigation: Equatable { case stay, openExternally, cancel }
+
+    /// What the preview does with a navigation: local pages stay in the tab; only a click on an
+    /// http, https or mailto link goes to the system; everything else (file:, app schemes, script
+    /// redirects) is dropped.
+    static func navigation(to url: URL, clicked: Bool) -> Navigation {
+        if isLocal(url) { return .stay }
+        let scheme = url.scheme?.lowercased() ?? ""
+        return clicked && ["http", "https", "mailto"].contains(scheme) ? .openExternally : .cancel
+    }
 }
