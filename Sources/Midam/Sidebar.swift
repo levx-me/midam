@@ -63,6 +63,8 @@ struct ProjectDrag: Transferable, Codable {
     @Published var addingProject = false
     /// Projects just added from the Add Project sheet: selected and scrolled to once a scan lists them.
     var reveal: [String] = []
+    /// A row to bring into view (ScrollViewReader); cleared once scrolled.
+    @Published var scrollTarget: SidebarItem?
 
     private var dragWatch: Task<Void, Never>?
     /// SwiftUI says nothing when a drag is cancelled: clear the drag once the mouse button is up
@@ -371,7 +373,7 @@ struct Sidebar: View {
             }
             if library.projects.isEmpty { SidebarEmpty(library: library) }
             else if shown.isEmpty, state.filtering { FilterEmpty(state: state) }
-            else { list(shown) }
+            else { list(shown).clipped() } // rows scroll out of sight below the lights' strip, not under it
             footer
         }
         .background { SidebarMaterial().ignoresSafeArea() }
@@ -451,7 +453,7 @@ struct Sidebar: View {
 
     private func list(_ shown: [LibraryProject]) -> some View {
         let parts = Library.sections(shown, pinned: library.pinned)
-        return List(selection: $state.selection) {
+        return ScrollViewReader { proxy in List(selection: $state.selection) {
             if !(state.filtering && parts.pinned.isEmpty) {
                 Section {
                     ForEach(parts.pinned) { tree($0, pinned: parts.pinned) }
@@ -490,16 +492,30 @@ struct Sidebar: View {
             let near = { (root: String, p: LibraryProject) in p.id == root || root.hasPrefix(p.id + "/") || p.id.hasPrefix(root + "/") }
             if let project = state.reveal.lazy.compactMap({ root in library.projects.first { near(root, $0) } }).first {
                 state.reveal = []
-                state.selection = .project(project.id)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { // after the sheet has gone and the row exists
-                    guard let w = NSApp.mainWindow ?? NSApp.windows.first(where: { Sidebar.find(NSOutlineView.self, in: $0.contentView) != nil }),
-                          let outline = Sidebar.find(NSOutlineView.self, in: w.contentView) else { return }
-                    w.makeFirstResponder(outline)
-                    if let r = outline.selectedRowIndexes.first { outline.scrollRowToVisible(r) }
+                let item = SidebarItem.project(project.id)
+                // The list takes a selection only once its rows exist: set it on the next turn,
+                // then scroll to it as soon as the outline shows it selected.
+                DispatchQueue.main.async { state.scrollTarget = item; state.selection = item }
+                func scroll(_ tries: Int) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        guard let w = NSApp.mainWindow ?? NSApp.windows.first(where: { Sidebar.find(NSOutlineView.self, in: $0.contentView) != nil }),
+                              let outline = Sidebar.find(NSOutlineView.self, in: w.contentView) else { return }
+                        if state.selection != item { state.selection = item }
+                        guard let r = outline.selectedRowIndexes.first else { if tries < 12 { scroll(tries + 1) }; return }
+                        w.makeFirstResponder(outline)
+                        outline.scrollRowToVisible(r)
+                    }
                 }
+                scroll(0)
             }
         }
         .accessibilityLabel("Documents")
+        .onChange(of: state.scrollTarget) { _, target in
+            guard let target else { return }
+            proxy.scrollTo(target, anchor: .center) // an offscreen row takes no selection until scrolled to
+            state.scrollTarget = nil
+        }
+        }
     }
 
     /// A project, its kinds and their documents. `pinned` is the pinned section's rows, nil in All.
@@ -520,6 +536,7 @@ struct Sidebar: View {
         } label: {
             ProjectRow(project: project, pinnedRows: pinned) { primary(.project(project.id)) }
                 .tag(SidebarItem.project(project.id))
+                .id(SidebarItem.project(project.id))
         }
     }
 

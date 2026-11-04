@@ -255,8 +255,10 @@ body > #source .hljs-string, body > #source .hljs-symbol { color: var(--link); }
 .hljs-meta .hljs-keyword, .hljs-meta .hljs-string { color: inherit; }
 .hljs-subst { color: var(--text); } /* interpolation reads as code inside the string */
 
-::highlight(midam-find) { background-color: var(--mark); }
-::highlight(midam-current) { background-color: var(--find-current); }
+/* Find: render.js draws a box over each match in a layer outside the views (a child of <html>). */
+html > .midam-find { position: absolute; top: 0; left: 0; pointer-events: none; }
+html > .midam-find > div { position: absolute; background: var(--mark); border-radius: 2px; }
+html > .midam-find > .current { background: var(--find-current); }
 
 mark { background: var(--mark); color: inherit; padding: 0 0.15em; }
 

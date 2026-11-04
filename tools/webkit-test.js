@@ -230,36 +230,61 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("drawing it keeps the line being read where it was", Math.abs(post.top - pre.top) < 1, [pre.top, post.top]);
   check("the drawn page goes to the render cache", post.html, post);
 
-  // 7. Find typed letter by letter, then closed: a highlight name is never set() over a registered one
-  // (the system WebKit repaints nothing then, so old boxes stay on screen), only the current query's
-  // matches are registered, the current one sits on its text, and nothing is left after closing.
+  // 7. Find typed letter by letter, then closed. Each match gets a box in a layer outside the views
+  // (the CSS Custom Highlight API painted offset and left stale boxes in the system WebKit): one
+  // current box, lying on its text within 1px (inline code in Korean text at the app's line height),
+  // still on it after a reading-setting reflow, none for a match scrolled out of a wide code block,
+  // and nothing left after closing.
   const f = await page.evaluate(async () => {
-    await midamRender("The ADL engine adds depth and decides on a deposit.\n\nEach decision updates the OrderBook dependency.", "", {});
-    const set = HighlightRegistry.prototype.set;
-    let replaced = 0;
-    HighlightRegistry.prototype.set = function (k, v) { if (this.has(k)) replaced++; return set.call(this, k, v); };
+    const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await midamRender("ADL 엔진은 `DepositRouter`로 예치하고 `depositFor`를 부릅니다. 깊이를 더해 결정합니다.\n\n" +
+      "각 결정은 OrderBook dependency를 갱신합니다.\n\n```\n" + "x".repeat(400) + " deposit\n```", "", {});
+    scrollTo(0, 0);
+    const near = (a, b) => Math.abs(a.top - b.top) <= 1 && Math.abs(a.bottom - b.bottom) <= 1 && Math.abs(a.left - b.left) <= 1 && Math.abs(a.right - b.right) <= 1;
+    const onText = () => {
+      const boxes = [...document.querySelectorAll("html > .midam-find > .current")].map(e => e.getBoundingClientRect());
+      const text = [...finds[current].getClientRects()];
+      return boxes.length === text.length && boxes.length > 0 && boxes.every((b, i) => near(b, text[i]));
+    };
     const steps = [];
     for (const q of ["d", "de", "dep"]) {
       const [index, count] = midamFind(q, 0);
-      const ranges = [...CSS.highlights.get("midam-find")], cur = [...CSS.highlights.get("midam-current")][0];
-      const a = cur.getBoundingClientRect(), t = document.createRange();
-      t.selectNodeContents(cur.startContainer.parentElement);
-      const on = [...t.getClientRects()].some(b => a.left >= b.left - 1 && a.right <= b.right + 1 && a.top < b.bottom && a.bottom > b.top && a.height > 0);
-      steps.push({ q, index, count, registered: ranges.length, all: ranges.every(r => r.toString().toLowerCase() === q), on });
+      const layers = document.querySelectorAll("html > .midam-find").length;
+      const boxes = document.querySelectorAll("html > .midam-find > div").length;
+      steps.push({ q, index, count, layers, boxes, all: finds.every(r => r.toString().toLowerCase() === q), on: onText() });
     }
+    const code = finds.at(-1).startContainer.parentElement.closest("pre"); // "deposit" past the code block's right edge
+    const clipped = code.scrollLeft === 0 && finds.at(-1).getBoundingClientRect().left > code.getBoundingClientRect().right &&
+      document.querySelectorAll("html > .midam-find > div").length === finds.length - 1;
+    midamStyle({ size: 1.4, leading: 2.05 });
+    await frame();
+    const reflowed = onText();
+    midamStyle({});
     midamFindStep(1);
+    // A long page: boxes only around the window, and drawn anew where it scrolls to.
+    await midamRender(Array.from({ length: 400 }, (_, i) => "Deposit " + i + ".").join("\n\n"), "", {});
+    scrollTo(0, 0);
+    await frame(); // the new page's resize redraw is done: only the scroll can draw below
+    midamFind("deposit", 0);
+    const few = document.querySelectorAll("html > .midam-find > div").length;
+    scrollTo(0, document.documentElement.scrollHeight);
+    await frame();
+    const last = finds.at(-1).getBoundingClientRect();
+    const band = { few, count: finds.length, last: [...document.querySelectorAll("html > .midam-find > div")].some(e => near(e.getBoundingClientRect(), last)) };
     midamFindClear();
-    HighlightRegistry.prototype.set = set;
-    return { steps, replaced, left: CSS.highlights.size, marks: document.querySelectorAll("mark").length };
+    await frame();
+    return { steps, clipped, reflowed, band, left: document.querySelectorAll(".midam-find, mark").length, highlights: CSS.highlights.size };
   });
-  check("find: no highlight is set over a registered one (WebKit would not repaint)", f.replaced === 0, f.replaced);
   for (const s of f.steps) {
-    check(`find "${s.q}": only its matches are registered`, s.count > 0 && s.registered === s.count && s.all, s);
-    check(`find "${s.q}": the current match sits on its text`, s.index === 1 && s.on, s);
+    check(`find "${s.q}": one layer, a box per match (bar the one out of the code block), only its matches`, s.count > 1 && s.layers === 1 && s.boxes === s.count - 1 && s.all, s);
+    check(`find "${s.q}": the current match's box lies on its text within 1px`, s.index === 1 && s.on, s);
   }
-  check("find closed: no highlight or mark left", f.left === 0 && f.marks === 0, f);
+  check("find: a match scrolled out of a wide code block shows no box", f.clipped, f);
+  check("find: after a reflow the current box is still on its text", f.reflowed, f);
+  check("find in a long page: boxes only near the window, drawn where it scrolls", f.band.few > 0 && f.band.few < f.band.count / 2 && f.band.last, f.band);
+  check("find closed: no box, layer or mark left", f.left === 0 && f.highlights === 0, f);
 
   await browser.close();
-  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find highlights)`);
+  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find boxes)`);
   process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("FAILED", e); process.exit(1); });

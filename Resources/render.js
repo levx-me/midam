@@ -384,6 +384,7 @@ function midamStyle(s) {
   document.documentElement.toggleAttribute("data-mono", s.monochrome === true);
   if (!fontFaces && Array.isArray(s.faces)) addFaces(s.faces);
   redrawDiagrams();
+  findLayout();
 }
 
 // The fonts bundled in the app, as @font-face rules in one <style>, added once. WebKit renders
@@ -407,9 +408,12 @@ function addFaces(list) {
   document.head.appendChild(fontFaces);
 }
 
-// Find: matches are painted with the CSS Custom Highlight API, so the DOM is never touched.
+// Find: each match gets a box in a layer over the page, built from the match's line boxes. The
+// layer is a child of <html>, outside both views, so the page's DOM, selection, copy and the render
+// cache never see it, and closing find removes it: nothing stays painted. (The CSS Custom Highlight
+// API painted the boxes offset upward and left them on screen after closing in the system WebKit.)
 // ponytail: matches within one text node only; a query spanning e.g. **bold** edges is not found.
-let finds = [], current = -1;
+let finds = [], current = -1, findLayer = null, findFrame = 0, findBand = [0, 0];
 
 function midamFind(q, keep) {
   finds = [];
@@ -428,8 +432,7 @@ function midamFind(q, keep) {
     }
   }
   // Start at the first match on screen; after a reload keep the same match number.
-  current = keep > 0 ? Math.min(keep, finds.length) - 1 : finds.findIndex(r => r.getBoundingClientRect().bottom > 0);
-  if (current < 0 && finds.length) current = 0;
+  current = !finds.length ? -1 : keep > 0 ? Math.min(keep, finds.length) - 1 : firstBelow(0) % finds.length;
   return midamFindPaint(keep <= 0);
 }
 
@@ -438,15 +441,9 @@ function midamFindStep(d) {
   return midamFindPaint(true);
 }
 
-// Clear, then set under fresh names: the system WebKit (before 319154@main, webkit.org/b/321567)
-// repaints nothing when set() replaces a registered highlight, so the last query's boxes stayed
-// painted (and later half-repainted) after the query changed or find closed. clear() repaints the
-// old ranges; a new name repaints the new ones.
 function midamFindPaint(reveal) {
-  CSS.highlights.clear();
-  CSS.highlights.set("midam-find", new Highlight(...finds));
+  drawFinds();
   if (current >= 0) {
-    CSS.highlights.set("midam-current", new Highlight(finds[current]));
     const b = finds[current].getBoundingClientRect();
     if (reveal && (b.top < headerInset + 48 || b.bottom > innerHeight - 24)) scrollBy(0, b.top - innerHeight / 3);
   }
@@ -456,5 +453,78 @@ function midamFindPaint(reveal) {
 function midamFindClear() {
   finds = [];
   current = -1;
-  CSS.highlights.clear();
+  drawFinds();
+}
+
+// The first match whose bottom is below y (window px), by bisection: matches run down the page.
+function firstBelow(y) {
+  let lo = 0, hi = finds.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (finds[mid].getBoundingClientRect().bottom > y) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+// The boxes in page coordinates (they scroll with the page), each cut to the blocks that scroll
+// sideways around it (code, wide tables, diagrams, formulas), so a match scrolled out of its block
+// shows no box. Only the matches from a screen above to a screen below the window get boxes (a
+// one-letter query in a long page has thousands); scrolling near the band's edge draws a new one.
+// Rebuilt whole: on a query or step, and when the layout moves the text (findLayout).
+// ponytail: assumes matches run down the page in document order (one column); a match out of
+// order more than a screen away from its neighbours gets no box.
+function drawFinds() {
+  findLayer?.remove();
+  findLayer = null;
+  if (!finds.length) return;
+  const layer = document.documentElement.appendChild(document.createElement("div"));
+  layer.className = "midam-find";
+  const o = layer.getBoundingClientRect(), clips = new Map(), boxes = document.createDocumentFragment();
+  findBand = [scrollY - innerHeight, scrollY + 2 * innerHeight];
+  for (let i = firstBelow(-innerHeight); i < finds.length; i++) {
+    const r = finds[i], rects = r.getClientRects();
+    if (rects.length && rects[0].top > 2 * innerHeight) break;
+    const c = clipOf(r.startContainer.parentElement, clips);
+    for (const b of rects) {
+      const left = Math.max(b.left, c.left), right = Math.min(b.right, c.right);
+      const top = Math.max(b.top, c.top), bottom = Math.min(b.bottom, c.bottom);
+      if (right - left < 0.5 || bottom - top < 0.5) continue; // cut away, or a match whose text is gone (re-render)
+      const box = boxes.appendChild(document.createElement("div"));
+      if (i === current) box.className = "current";
+      box.style.cssText = `left:${left - o.left}px;top:${top - o.top}px;width:${right - left}px;height:${bottom - top}px`;
+    }
+  }
+  layer.appendChild(boxes);
+  findLayer = layer;
+}
+
+// The visible area of el's clipping HTML ancestors (SVG parts have no client box), cached per element.
+function clipOf(el, cache) {
+  if (!el || el === document.body) return { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+  let c = cache.get(el);
+  if (c) return c;
+  c = clipOf(el.parentElement, cache);
+  const s = el instanceof HTMLElement && getComputedStyle(el);
+  if (s && (s.overflowX !== "visible" || s.overflowY !== "visible")) {
+    const b = el.getBoundingClientRect(), x = b.left + el.clientLeft, y = b.top + el.clientTop;
+    c = { left: Math.max(c.left, x), top: Math.max(c.top, y), right: Math.min(c.right, x + el.clientWidth), bottom: Math.min(c.bottom, y + el.clientHeight) };
+  }
+  cache.set(el, c);
+  return c;
+}
+
+// Text moves without a find call when the window or a block resizes, images load, a diagram is
+// drawn, fonts arrive, reading settings change (midamStyle) or a block scrolls sideways, and when
+// the page scrolls within half a screen of the drawn band: redraw once per frame then. (A
+// re-render or view switch calls midamFind again from the app.)
+function findLayout() {
+  if (finds.length && !findFrame) findFrame = requestAnimationFrame(() => { findFrame = 0; drawFinds(); });
+}
+if (globalThis.ResizeObserver) { // the Node tests load this file without a page
+  new ResizeObserver(findLayout).observe(document.body);
+  document.fonts.addEventListener("loadingdone", findLayout);
+  document.addEventListener("scroll", e => {
+    if (e.target !== document || scrollY - innerHeight / 2 < findBand[0] || scrollY + 1.5 * innerHeight > findBand[1]) findLayout();
+  }, { capture: true, passive: true });
 }
