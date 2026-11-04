@@ -39,6 +39,7 @@ struct MidamApp: App {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("New Agent…") { store.showWindow(); store.newAgentOpen = true }.keyboardShortcut(.newAgent)
             Button("New Tab") { Sidebar.toggleFocus(store) }.keyboardShortcut(.newTab)
             Button("Open…") { store.showOpenPanel() }.keyboardShortcut(.open)
             Menu("Open Recent") {
@@ -53,6 +54,8 @@ struct MidamApp: App {
         CommandGroup(replacing: .saveItem) {
             Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTab)
             Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTabX).disabled(store.current == nil || store.findFocused)
+            Button("Clear Scrollback") { store.currentAgent?.terminal?.clear() }
+                .keyboardShortcut(.clearScrollback).disabled(store.currentAgent?.terminal == nil)
             Divider()
             Button("Show in Finder") { page?.reveal() }
                 .keyboardShortcut(.showInFinder).disabled(page == nil)
@@ -109,14 +112,14 @@ struct MidamApp: App {
         CommandGroup(after: .windowArrangement) {
             // ⌘1…⌘8 pick a tab by position, ⌘9 the last, ⌃Tab and ⌃⇧Tab step, as in Safari.
             Divider()
-            Button("Show Next Tab") { store.step(1) }.keyboardShortcut(.nextTab).disabled(store.files.count < 2)
-            Button("Show Previous Tab") { store.step(-1) }.keyboardShortcut(.previousTab).disabled(store.files.count < 2)
+            Button("Show Next Tab") { store.step(1) }.keyboardShortcut(.nextTab).disabled(store.tabCount < 2)
+            Button("Show Previous Tab") { store.step(-1) }.keyboardShortcut(.previousTab).disabled(store.tabCount < 2)
             Divider()
             ForEach(1...8, id: \.self) { n in
                 Button("Tab \(n)") { store.select(n) }
-                    .keyboardShortcut(.tab(n)).disabled(store.files.count < n)
+                    .keyboardShortcut(.tab(n)).disabled(store.tabCount < n)
             }
-            Button("Last Tab") { store.select(nil) }.keyboardShortcut(.lastTab).disabled(store.files.isEmpty)
+            Button("Last Tab") { store.select(nil) }.keyboardShortcut(.lastTab).disabled(store.tabCount == 0)
         }
         CommandMenu("Go") {
             // Through the places read, across tabs: links followed and tabs switched (⇧⌘[ ] switch tabs).

@@ -11,11 +11,13 @@ import AppKit
     @Published private(set) var progress: Double = 0
     @Published private(set) var scannedOnce = false
     @Published private(set) var agents = FoundAgents(claudeProjects: 0, codexSessions: 0)
-    /// Pinned project ids in the user's order, and hidden ones (Settings lists them to restore).
+    /// Pinned project ids in the user's order.
     @Published private(set) var pinned: [String] = []
-    @Published private(set) var hidden: Set<String> = []
+    /// The registry: the projects the user registered; the only ones scanned and listed.
+    @Published private(set) var registered: Set<String> = []
+    /// Midam-run conversations, several per project (the conversation engine fills them in).
+    @Published private(set) var conversations: [AgentConversation] = []
 
-    /// Hidden projects are left out of the list and so of the Dock badge.
     var totalUnread: Int { projects.reduce(0) { $0 + $1.unread } }
 
     private var state: LibraryState
@@ -32,6 +34,8 @@ import AppKit
     /// first listed wins), for the sidebar's current row; resolved once per path (`resolved`).
     private(set) var docAtPath: [String: String] = [:]
     private var resolved: [String: String] = [:]
+    /// The session that wrote each scanned document, by the resolved path of every language version.
+    private var sessionAt: [String: WritingSession] = [:]
 
     private init() {
         // Until a first scan has completed (an install from before the flag has `known` instead):
@@ -39,13 +43,21 @@ import AppKit
         let d = UserDefaults.standard
         baselining = !d.bool(forKey: Key.scannedOnce) && d.object(forKey: Key.known) == nil
         state = LibraryState(opened: Self.load(Key.opened, [:]), pinned: Self.load(Key.pinned, []),
-                             hidden: Self.load(Key.hidden, []), added: Self.load(Key.added, []),
+                             added: Self.load(Key.added, []),
                              overrides: Self.load(Key.overrides, [:]), dismissed: Self.load(Key.dismissed, []),
                              known: Self.load(Key.known, [:]), modelKinds: Self.load(Key.modelKinds, [:]))
-        state.hiddenPins = Self.load(Key.hiddenPins, [:])
         baselineProjects = Self.load(Key.baseline, [])
+        if !d.bool(forKey: Key.registry) { // once: the registry replaces auto collection and hiding
+            state.added = Registry.migrate(added: state.added, pinned: state.pinned, hidden: Self.load(Key.hidden, Set<String>()))
+            state.pinned = state.pinned.filter(state.added.contains)
+            for old in [Key.hidden, "library.hiddenPins"] { d.removeObject(forKey: old) }
+            Self.save(state.added, Key.added)
+            Self.save(state.pinned, Key.pinned)
+            d.set(true, forKey: Key.registry)
+        }
         pinned = state.pinned
-        hidden = state.hidden
+        registered = state.added
+        conversations = Self.load(Key.conversations, [])
         for old in ["library.order", "library.folders"] { UserDefaults.standard.removeObject(forKey: old) } // replaced by pins and Add Project
     }
 
@@ -74,7 +86,7 @@ import AppKit
             let first = previous == nil // fills as it goes only without a cache to show
             let scan = LibraryScanner(env: env)
             scan.previous = previous ?? ScanMarks()
-            let claude = scan.claudeTranscripts(added: added), codex = scan.codexSessions(added: added)
+            let claude = scan.claudeTranscripts(registered: added), codex = scan.codexSessions(registered: added)
             let found = FoundAgents(claudeProjects: scan.claudeProjectCount(), codexSessions: codex.count)
             let total = claude.count + codex.count
             var hits: [Hit] = []
@@ -109,6 +121,9 @@ import AppKit
 
     private func show(_ infos: [DocInfo], progress: Double, agents: FoundAgents) {
         self.infos = infos
+        var sessions: [String: WritingSession] = [:]
+        for i in infos { if let s = i.session { for p in i.variants.map(\.path) + [i.id] { sessions[p] = s } } }
+        sessionAt = sessions
         if baselining { state.opened.merge(Library.baseline(infos)) { mine, _ in mine } }
         else if !baselineProjects.isEmpty {
             state.opened.merge(Library.baseline(infos.filter { baselineProjects.contains($0.project) })) { mine, _ in mine }
@@ -162,7 +177,7 @@ import AppKit
     }
 
     private func recompute() {
-        let next = Library.projects(infos, state: state)
+        let next = Library.projects(infos.filter { state.added.contains($0.project) }, state: state)
         if next != projects { projects = next }
     }
 
@@ -198,6 +213,10 @@ import AppKit
         Self.save(state.opened, Key.opened) // only what changed
         recompute()
     }
+
+    /// The newest agent session that wrote this file (or another language version of it), for
+    /// "Resume the session that wrote this"; nil when no scanned history wrote it.
+    func session(for path: String) -> WritingSession? { sessionAt[real(path)] }
 
     /// The language version opened most recently, else the base (or the only one).
     func url(for doc: LibraryDoc) -> URL {
@@ -239,46 +258,72 @@ import AppKit
         recompute()
     }
 
-    /// Hiding unpins; the pin's place is kept for `unhide` and `add`.
-    func hide(_ id: String) {
-        if let i = state.pinned.firstIndex(of: id) { state.hiddenPins[id] = i }
-        state.pinned.removeAll { $0 == id }
-        pinned = state.pinned
-        state.hidden.insert(id)
-        hidden = state.hidden
-        persist()
-        recompute()
-    }
-
-    func unhide(_ id: String) {
-        restorePins([id])
-        state.hidden.remove(id)
-        hidden = state.hidden
-        persist()
-        recompute()
-    }
-
-    private func restorePins(_ ids: Set<String>) {
-        for id in ids.sorted(by: { (state.hiddenPins[$0] ?? 0) < (state.hiddenPins[$1] ?? 0) }) {
-            guard let slot = state.hiddenPins.removeValue(forKey: id) else { continue }
-            state.pinned = Library.restorePin(id, at: slot, in: state.pinned)
-        }
-        pinned = state.pinned
-    }
-
-    /// Projects chosen in Add Project: collected from all their history from now on, shown again
-    /// if hidden, their documents starting read.
-    func add(_ roots: Set<String>) {
-        guard !roots.isEmpty else { return }
-        let new = roots.subtracting(state.added)
-        state.added.formUnion(roots)
-        restorePins(roots.intersection(state.hidden))
-        state.hidden.subtract(roots)
-        baselineProjects.formUnion(new.subtracting(projects.map(\.id)).subtracting(hidden)) // a hidden one keeps its unread
-        hidden = state.hidden
+    /// Registers a project: it is scanned from all its history and listed, its documents starting read.
+    func register(root: String) {
+        guard !state.added.contains(root) else { return }
+        state.added.insert(root)
+        registered = state.added
+        baselineProjects.insert(root)
         persist()
         recompute()
         rescan()
+    }
+
+    /// Takes the project off the list (nothing on disk is touched); its pin and conversations go too.
+    func unregister(root: String) {
+        guard state.added.remove(root) != nil else { return }
+        registered = state.added
+        baselineProjects.remove(root)
+        unpin(root)
+        conversations.removeAll { $0.root == root }
+        persist()
+        recompute()
+    }
+
+    /// Whether `path` is in a registered project; a plain .md outside them lives only as a tab.
+    func isInRegisteredProject(_ path: String) -> Bool { Registry.contains(path, in: state.added) }
+
+    // Compatibility with the old sidebar and Add Project sheet (the sidebar rework removes them).
+    var hidden: Set<String> { [] }
+    func unhide(_ id: String) {}
+    func hide(_ id: String) { unregister(root: id) }
+    func add(_ roots: Set<String>) { roots.forEach { register(root: $0) } }
+
+    // MARK: Conversations
+
+    func conversations(in root: String) -> [AgentConversation] { conversations.filter { $0.root == root } }
+
+    /// Registers the conversation's project too.
+    func addConversation(_ c: AgentConversation) {
+        register(root: c.root)
+        conversations.append(c)
+        Self.save(conversations, Key.conversations)
+    }
+
+    func updateConversation(_ id: String, _ change: (inout AgentConversation) -> Void) {
+        guard let i = conversations.firstIndex(where: { $0.id == id }) else { return }
+        change(&conversations[i])
+        Self.save(conversations, Key.conversations)
+    }
+
+    func removeConversation(_ id: String) {
+        conversations.removeAll { $0.id == id }
+        Self.save(conversations, Key.conversations)
+    }
+
+    /// The documents a session wrote, newest first.
+    func docs(ofSession id: String) -> [DocInfo] { Library.docs(ofSession: id, in: infos) }
+
+    /// The newest `limit` agent sessions to resume, read off the main thread.
+    nonisolated func recentSessions(limit: Int = 300) async -> [RecentSession] {
+        await Task.detached(priority: .userInitiated) { RecentSessions.load(limit: limit) }.value
+    }
+
+    /// New project: made, registered; the error is for the sheet to show.
+    func createProject(name: String) throws -> URL {
+        let url = try Projects.create(name: name)
+        register(root: url.path)
+        return url
     }
 
     func dismiss(_ doc: LibraryDoc) {
@@ -290,22 +335,21 @@ import AppKit
     // MARK: Persistence
 
     private enum Key {
-        static let opened = "library.opened", pinned = "library.pinned", hidden = "library.hidden",
+        static let opened = "library.opened", pinned = "library.pinned", hidden = "library.hidden", // hidden: read once by the migration
+                   registry = "library.registry", conversations = "library.conversations",
                    added = "library.added", overrides = "library.kinds", dismissed = "library.dismissed",
                    known = "library.known", modelKinds = "library.modelKinds", scannedOnce = "library.scannedOnce",
-                   hiddenPins = "library.hiddenPins", baseline = "library.baselineProjects"
+                   baseline = "library.baselineProjects"
     }
 
     private func persist() {
         Self.save(state.opened, Key.opened)
         Self.save(state.pinned, Key.pinned)
-        Self.save(state.hidden, Key.hidden)
         Self.save(state.added, Key.added)
         Self.save(state.overrides, Key.overrides)
         Self.save(state.dismissed, Key.dismissed)
         Self.save(state.known, Key.known)
         Self.save(state.modelKinds, Key.modelKinds)
-        Self.save(state.hiddenPins, Key.hiddenPins)
         Self.save(baselineProjects, Key.baseline)
     }
 

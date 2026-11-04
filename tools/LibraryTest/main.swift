@@ -1,5 +1,5 @@
 // Checks the library rules: what counts as written, projects, kinds, language pairs, unread, order. Run:
-// swiftc Sources/Midam/Library.swift tools/LibraryTest/main.swift -o /tmp/library && /tmp/library
+// swiftc Sources/Midam/Library.swift Sources/Midam/Projects.swift tools/LibraryTest/main.swift -o /tmp/library && /tmp/library
 import Foundation
 
 let fm = FileManager.default
@@ -70,10 +70,11 @@ write(c1, [
 let env = ScanEnv(home: home, excluded: ["/private/tmp/never/", "scratchpad"], now: now)
 let scan = LibraryScanner(env: env)
 
-// Window and sources.
-assert(scan.claudeTranscripts() == [t1])                          // the 8-day-old transcript is out
-assert(scan.claudeTranscripts(added: [other]) == [t1, t2])        // unless its project was added
-assert(scan.codexSessions() == [c1])
+// Sources: registered projects only, any age.
+assert(scan.claudeTranscripts(registered: []).isEmpty)
+assert(scan.claudeTranscripts(registered: [repo]) == [t1])
+assert(scan.claudeTranscripts(registered: [repo, other]) == [t1, t2]) // the 8-day-old one counts too
+assert(scan.codexSessions(registered: [other]) == [c1] && scan.codexSessions(registered: [repo]).isEmpty)
 let claude = scan.claudeHits(t1)
 let codex = scan.codexHits(c1)
 assert(!claude.contains { $0.path.hasSuffix("readonly.md") })     // Read does not count
@@ -210,9 +211,6 @@ let later = infos[0]
 assert(Library.unread(later.variants, modified: later.modified.addingTimeInterval(60), opened: fresh.opened))
 state.opened[repo + "/x.md"] = now.addingTimeInterval(10)
 assert(Library.projects(infos, state: state).map(\.id) == [repo, other]) // read again later: first
-state.hidden = [other]
-assert(Library.projects(infos, state: state).map(\.id) == [repo])        // hidden projects leave the list
-state.hidden = []
 state.dismissed = [wasHere]
 assert(Library.projects(infos, state: state).first { $0.id == repo }!.docCount == 9) // dismissed deleted doc hidden
 assert(Library.known(infos, state: state)[wasHere] == nil)
@@ -233,9 +231,6 @@ assert(Library.pin(a, onto: c, in: [c, a]) == [a, c])             // moving up: 
 assert(Library.pin(c, onto: a, in: [c, a, b]) == [a, c, b])       // moving down: after the target
 assert(Library.pin(d, onto: a, in: [c, a, b]) == [c, d, a, b])    // a new pin dropped on a row: before it
 assert(Library.pin(a, onto: a, in: [c, a]) == [c, a])
-assert(Library.restorePin(b, at: 1, in: [c, a]) == [c, b, a])      // unhidden: back in its old place
-assert(Library.restorePin(b, at: 5, in: [c]) == [c, b])            // its place is gone: the bottom
-assert(Library.restorePin(b, at: 0, in: [b, c]) == [b, c])         // already pinned: unchanged
 let listed = Set([a, b, c, d])
 assert(Library.movePinned(a, by: -1, in: [c, a], listed: listed) == [a, c] && Library.movePinned(c, by: -1, in: [c, a], listed: listed) == [c, a])
 assert(Library.movePinned(a, by: -1, in: [c, "/gone", a], listed: listed) == [a, "/gone", c]) // past a pin not listed now
@@ -290,5 +285,52 @@ let old = cands.first { $0.agent == .claude && $0.root == other }!
 assert(old.sources == [t2] && cands.contains { $0.agent == .claude && $0.root == repo } && cands.contains { $0.agent == .codex && $0.root == other })
 assert(scan.docCount(old) == 1)                                    // old.md
 assert(scan.docCount(cands.first { $0.agent == .claude && $0.root == repo }!) >= 9)
+
+// Session → docs: every session that wrote a doc keeps it, newest first.
+let sa = WritingSession(agent: .claude, id: "sa", cwd: repo), sb = WritingSession(agent: .claude, id: "sb", cwd: repo)
+write(repo + "/s1.md", "# S1\n", age: 100)
+write(repo + "/s2.md", "# S2\n", age: 50)
+let multi = LibraryScanner(env: env).docs([Hit(path: repo + "/s1.md", project: repo, session: sa), Hit(path: repo + "/s2.md", project: repo, session: sa),
+                                           Hit(path: repo + "/s1.md", project: repo, session: sb)], known: [:])
+assert(Library.docs(ofSession: "sa", in: multi).map(\.id) == [repo + "/s2.md", repo + "/s1.md"])
+assert(Library.docs(ofSession: "sb", in: multi).map(\.id) == [repo + "/s1.md"] && Library.docs(ofSession: "zz", in: multi).isEmpty)
+assert(multi.first { $0.id == repo + "/s1.md" }!.session == sa)    // the doc's own session is still the newest
+
+// Registry: migration and membership.
+assert(Registry.migrate(added: ["/a"], pinned: ["/b", "/h"], hidden: ["/h", "/x"]) == ["/a", "/b"])
+assert(Registry.contains(repo + "/docs/x.md", in: [repo]) && !Registry.contains(repo + "-wt/x.md", in: [repo]) && !Registry.contains("/", in: []))
+
+// Recent sessions: topic is the ai-title, else the first real prompt; cut lines are skipped.
+let user = #"{"type":"user","cwd":"/w/app","message":{"role":"user","content":"Fix the parser\nthen more"}}"#
+let meta = #"{"type":"user","isMeta":true,"cwd":"/w/app","message":{"role":"user","content":"caveat"}}"#
+let cmd = #"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#
+let toolResult = #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}"#
+let partsLine = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Parts prompt"}]}}"#
+let title = #"{"type":"ai-title","aiTitle":"Parser fixes"}"#
+assert(RecentSessions.parse([meta, cmd, toolResult, user, title].joined(separator: "\n")) == ("/w/app", "Parser fixes"))
+assert(RecentSessions.parse([meta, cmd, toolResult, user].joined(separator: "\n")) == ("/w/app", "Fix the parser"))
+assert(RecentSessions.parse([user, toolResult, partsLine].joined(separator: "\n") + "\n{\"type\":\"ai-ti") == ("/w/app", "Fix the parser"))
+assert(RecentSessions.parse([toolResult, partsLine].joined(separator: "\n")).1 == "Parts prompt")
+let uid = "11111111-2222-3333-4444-555555555555", uid2 = "11111111-2222-3333-4444-666666666666"
+write(home + "/.claude/projects/-w-app/\(uid).jsonl", [user, title].joined(separator: "\n") + "\n", age: 10)
+write(home + "/.claude/projects/-w-app/\(uid2).jsonl", user + "\n", age: 5)
+let recent = RecentSessions.load(home: home)
+let mine = recent.filter { $0.projectRoot == "/w/app" }
+assert(mine.map(\.sessionID) == [uid2, uid] && mine.map(\.topic) == ["Fix the parser", "Parser fixes"] && mine[0].projectName == "app")
+assert(RecentSessions.load(home: home, limit: 1).count == 1 && recent.map(\.lastActive) == recent.map(\.lastActive).sorted(by: >))
+assert(mine[1].matches("PARSER app") && mine[1].matches("") && !mine[1].matches("parser zzz"))
+assert(RecentSession(agent: .claude, sessionID: "s", projectRoot: "/w/café", topic: "x", lastActive: now).matches("cafe"))
+
+// New project: name rules, the folder is made as a repository, an existing one is refused.
+let h2 = root + "/home2"
+for bad in ["", "  ", "a/b", ".hidden", String(repeating: "x", count: 101)] {
+    do { _ = try Projects.create(name: bad, home: h2); assertionFailure("accepted \(bad)") } catch { assert(error as? ProjectError == .invalidName) }
+}
+assert(!fm.fileExists(atPath: h2))                                 // refused names touch nothing
+let made = try! Projects.create(name: " demo ", home: h2)
+assert(made.path == h2 + "/workspace/demo" && fm.fileExists(atPath: made.path + "/.git"))
+do { _ = try Projects.create(name: "demo", home: h2); assertionFailure("exists") } catch { assert(error as? ProjectError == .exists) }
+let conv = AgentConversation(root: made.path)
+assert(try! JSONDecoder().decode(AgentConversation.self, from: JSONEncoder().encode(conv)) == conv)
 
 print("library rules: checks passed")

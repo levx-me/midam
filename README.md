@@ -24,6 +24,25 @@
 <p align="center"><img src="docs/screenshots/live-reload.gif" width="720" alt="A plan.md file growing section by section while Midam redraws each change"></p>
 <p align="center"><sub>Live reload: the page follows the file as it changes.</sub></p>
 
+## Agents
+
+Midam can hold a conversation with Claude in a tab beside your documents (File > New Agent…). It needs [Claude Code](https://code.claude.com) installed and signed in: Midam runs the `claude` your login shell finds, in the project's folder, with Claude Code's sandbox on and the wanjang plugin bundled into the app (copied from `WANJANG_DIR`, default `~/workspace/wanjang`, at build time, without its hooks that write to `~/.claude`: ledger, provider-fail and next). Your own Claude settings and the project's still apply.
+
+Every tool use goes through Midam first. These run at once:
+
+- reading, writing and running commands inside the project and the temporary folder
+- reading system tools (`/usr`, `/bin`, `/opt/homebrew`), the bundled plugin and Claude's saved output for the project
+- web pages, teammates, and connected services whose tool reads (`get…`, `list…`, `search…`, `read…`, `fetch…`, `query…`)
+
+These ask you first, with a card saying why:
+
+- anything outside the project: reading, writing or a command naming such a path (`/…`, `~`, `$HOME`, `..`, a bare `cd`); a project at your home folder or `/` has no inside, so everything there asks
+- deleting (`rm`, `git clean`, `git reset --hard`, moving to `/dev/null`), publishing (`git push`, `npm publish`, deploys, releases)
+- installing or changing the Mac (`sudo`, `brew install`, global npm, `curl | sh`), a command that wants out of the sandbox, and changes to what runs on its own next time: `.claude/`, `.mcp.json`, `.git/`
+- connected services that change something, and anything mentioning Stripe, billing or payment
+
+The sandbox also forbids commands to leave it, and neither commands nor file tools can read `~/.ssh`, `~/.aws`, `~/.gnupg` or `~/Library/Keychains`. The rules read the command text; the sandbox is what holds.
+
 ## Install
 
 Download the zip for your Mac from Releases: `Midam-<version>-apple-silicon.zip` (M-series) or `Midam-<version>-intel.zip`. Unzip it in Finder (double-click) or with `ditto -x -k <zip> .`, then move `Midam.app` to `/Applications`. Plain `unzip` drops parts of the app's signature.
@@ -56,7 +75,7 @@ sh tools/cli-test.sh                            # the midam command's exit codes
 swiftc Sources/Midam/TabOrder.swift tools/TabOrderTest/main.swift -o /tmp/taborder && /tmp/taborder
 ```
 
-The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest` and `tools/ReplyTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
+The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest`, `tools/ReplyTest`, `tools/ChatMarkdownTest`, `tools/AgentSessionsTest`, `tools/ConversationTest` (permission rules, launch flags, sandbox settings) and `tools/TeamTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
 
 ## Shortcuts
 

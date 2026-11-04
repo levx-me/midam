@@ -6,6 +6,8 @@ import SwiftUI
 /// them out of text fields and other windows.
 extension KeyboardShortcut {
     static let open = KeyboardShortcut("o")
+    static let newAgent = KeyboardShortcut("n")
+    static let clearScrollback = KeyboardShortcut("k") // in an agent's terminal tab, as in Terminal
     static let newTab = KeyboardShortcut("t") // into the sidebar's list, as a browser's new tab; ⇧⌘T is kept for reopening a closed tab
     static let closeTab = KeyboardShortcut("w")
     static let closeTabX = KeyboardShortcut("x", modifiers: []) // as in Vimium

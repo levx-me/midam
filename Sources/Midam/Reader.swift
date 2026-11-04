@@ -40,7 +40,17 @@ import UniformTypeIdentifiers
     static let shared = Store()
 
     @Published private(set) var files: [OpenFile] = []
-    @Published private(set) var selected: OpenFile.ID?
+    /// Conversations (and terminals) with agents, after the documents in the tab strip.
+    @Published private(set) var agents: [AgentTab] = []
+    /// The selected tab: a document's or an agent's id.
+    @Published private(set) var selected: UUID?
+    /// Where agents run; the UI talks to it only (D19).
+    let host: AgentHost = LocalAgentHost(library: LibraryModel.shared)
+    private var listening = false
+    /// Sessions whose team made the panel open on Team already (once per session).
+    private var teamShown = Set<String>()
+    /// File > New Agent… (⌘N) shows its sheet.
+    @Published var newAgentOpen = false
     /// The top of the header row: in a window, centred on the traffic lights' line; in full
     /// screen a small margin, or below the lights while macOS slides them in with the menu bar.
     @Published private(set) var rowTop: CGFloat = 3
@@ -119,9 +129,13 @@ import UniformTypeIdentifiers
 
     private var window: NSWindow?
     private var observers: [Any] = []
-    private static let filesKey = "openFiles", selectedKey = "selectedFile", frameName = "MidamMain"
+    private static let filesKey = "openFiles", selectedKey = "selectedFile", agentsKey = "openAgents", frameName = "MidamMain"
 
     var current: OpenFile? { files.first { $0.id == selected } }
+    var currentAgent: AgentTab? { agents.first { $0.id == selected } }
+    /// Every tab in strip order: the documents, then the agents.
+    private var order: [UUID] { files.map(\.id) + agents.map(\.id) }
+    var tabCount: Int { files.count + agents.count }
 
     // MARK: Opening
 
@@ -206,6 +220,7 @@ import UniformTypeIdentifiers
         if !given, let first = files.first { select(files.first { $0.url.path == savedSelection } ?? first, record: false) }
         save()
         if !files.isEmpty { showWindow() }
+        restoreAgents()
     }
 
     /// The Dock icon was clicked, or the app launched with nothing to open: show the window,
@@ -230,13 +245,34 @@ import UniformTypeIdentifiers
 
     /// Selects tab `n` (1-based), or the last tab for nil.
     func select(_ n: Int?) {
-        let i = n.map { $0 - 1 } ?? files.count - 1
-        if files.indices.contains(i) { select(files[i]) }
+        let ids = order, i = n.map { $0 - 1 } ?? ids.count - 1
+        if ids.indices.contains(i) { select(id: ids[i]) }
     }
 
     func step(_ d: Int) {
-        guard let i = files.firstIndex(where: { $0.id == selected }), files.count > 1 else { return }
-        select(files[(i + d + files.count) % files.count])
+        let ids = order
+        guard let i = ids.firstIndex(where: { $0 == selected }), ids.count > 1 else { return }
+        select(id: ids[(i + d + ids.count) % ids.count])
+    }
+
+    private func select(id: UUID, record: Bool = true) {
+        if let f = files.first(where: { $0.id == id }) { select(f, record: record) }
+        else if let a = agents.first(where: { $0.id == id }) { select(a, record: record) }
+    }
+
+    /// After closing the tab at `i` in strip order: its neighbour, or nothing left to show.
+    private func closed(at i: Int, wasSelected: Bool) {
+        let ids = order
+        if ids.isEmpty {
+            selected = nil
+            window?.title = "Midam"
+            window?.representedURL = nil
+            save()
+        } else if wasSelected {
+            select(id: ids[min(i, ids.count - 1)], record: false)
+        } else {
+            save()
+        }
     }
 
     /// Closes a tab; its web view and file watcher go with it. The last one leaves the window
@@ -246,16 +282,7 @@ import UniformTypeIdentifiers
         if selected == file.id { file.page.markRead() }
         SidebarChanges.shared.forget(file.url)
         files.remove(at: i)
-        if files.isEmpty {
-            selected = nil
-            window?.title = "Midam"
-            window?.representedURL = nil
-            save()
-        } else if selected == file.id {
-            select(files[min(i, files.count - 1)], record: false)
-        } else {
-            save()
-        }
+        closed(at: i, wasSelected: selected == file.id)
     }
 
     // MARK: Back and forward
@@ -304,7 +331,7 @@ import UniformTypeIdentifiers
     /// window (Settings) just closes.
     func closeCurrent() {
         if let key = NSApp.keyWindow, key !== window { return key.performClose(nil) }
-        if let current { close(current) } else { window?.performClose(nil) }
+        if let current { close(current) } else if let currentAgent { close(currentAgent) } else { window?.performClose(nil) }
     }
 
     private func save() {
@@ -312,6 +339,153 @@ import UniformTypeIdentifiers
         let d = UserDefaults.standard
         d.set(files.map(\.url.path), forKey: Self.filesKey)
         d.set(current?.url.path, forKey: Self.selectedKey)
+        // A conversation nothing was said in yet has no history to resume: it is not kept.
+        let keep = agents.filter { $0.terminal != nil || !$0.items.isEmpty }.map(\.save)
+        d.set(try? JSONEncoder().encode(keep), forKey: Self.agentsKey)
+    }
+
+    // MARK: Agents
+
+    /// A conversation with Claude in `project` (an AgentHost project id), new or resuming an
+    /// earlier session; as a terminal tab instead when Settings > Show as Terminal is on.
+    func openAgent(project: String, resume: String?) {
+        showWindow()
+        if let resume, let open = agents.first(where: { $0.session == resume }) { return select(open) }
+        if UserDefaults.standard.bool(forKey: Pref.agentTerminal) {
+            let tab = terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: project), sessionID: resume))
+            tab.terminal?.start()
+            agents.append(tab)
+            return select(tab)
+        }
+        Task { await openChat(project: project, resume: resume, select: true) }
+    }
+
+    @discardableResult private func openChat(project: String, resume: String?, select show: Bool) async -> AgentTab? {
+        listen()
+        do {
+            let session = try await host.open(project: project, resume: resume)
+            let tab = AgentTab(session: session, project: project)
+            agents.append(tab)
+            if show { select(tab) }
+            for item in (try? await host.items(session)) ?? [] { tab.upsert(item) }
+            tab.info = try? await host.info(session)
+            return tab
+        } catch {
+            NSApp.presentError(error)
+            return nil
+        }
+    }
+
+    private func terminalTab(_ state: TerminalTabState) -> AgentTab {
+        let t = AgentTerminal(state)
+        t.openLink = { [weak self] url, _ in self?.open(url) }
+        return AgentTab(session: state.sessionID, project: state.project.path, terminal: t)
+    }
+
+    /// Last session's agent tabs, back without running: conversations show their history.
+    private func restoreAgents() {
+        guard let data = UserDefaults.standard.data(forKey: Self.agentsKey),
+              let saved = try? JSONDecoder().decode([AgentTabSave].self, from: data), !saved.isEmpty else { return }
+        Task {
+            for s in saved {
+                if s.terminal {
+                    agents.append(terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: s.project), sessionID: s.session)))
+                } else if let session = s.session {
+                    await openChat(project: s.project, resume: session, select: false)
+                }
+            }
+            if selected == nil, let first = agents.first { select(first, record: false) }
+            showWindow()
+        }
+    }
+
+    func select(_ tab: AgentTab, record: Bool = true) {
+        if record, tab.id != selected, let here = here() { history.leave(here) }
+        Welcome.launchEmpty = false
+        selected = tab.id
+        window?.title = tab.title
+        window?.representedURL = nil
+        save()
+    }
+
+    /// Closes an agent tab; one whose turn is running asks first. The agent stops with it.
+    func close(_ tab: AgentTab) {
+        guard let i = order.firstIndex(of: tab.id) else { return }
+        if tab.busy {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "Stop the agent and close this tab?")
+            alert.addButton(withTitle: String(localized: "Close"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        agents.removeAll { $0.id == tab.id }
+        tab.terminal?.terminate()
+        if let s = tab.session, tab.terminal == nil { Task { try? await host.close(s) } }
+        closed(at: i, wasSelected: selected == tab.id)
+    }
+
+    /// The error line's Restart: the session opened again from its history.
+    func restart(_ tab: AgentTab) {
+        guard let s = tab.session, let i = agents.firstIndex(where: { $0.id == tab.id }) else { return }
+        Task {
+            try? await host.close(s)
+            guard let session = try? await host.open(project: tab.project, resume: s) else { return }
+            let fresh = AgentTab(session: session, project: tab.project)
+            fresh.draft = tab.draft
+            if agents.indices.contains(i), agents[i].id == tab.id { agents[i] = fresh } else { agents.append(fresh) }
+            select(fresh, record: false)
+            for item in (try? await host.items(session)) ?? [] { fresh.upsert(item) }
+            fresh.info = try? await host.info(session)
+        }
+    }
+
+    /// The host's events, to the tab of their session.
+    private func listen() {
+        guard !listening else { return }
+        listening = true
+        let stream = host.events()
+        Task { [weak self] in
+            for await event in stream { self?.route(event) }
+        }
+    }
+
+    private func route(_ event: HostEvent) {
+        switch event {
+        case .item(let session, let item):
+            guard let tab = agents.first(where: { $0.session == session }) else { return }
+            let first = tab.items.isEmpty
+            tab.upsert(item)
+            if first { save() } // now worth restoring
+        case .info(let info):
+            guard let tab = agents.first(where: { $0.session == info.id }) else { return }
+            if info.state == .blocked, tab.state != .blocked {
+                AccessibilityNotification.Announcement(String(localized: "Waiting for you")).post()
+            }
+            tab.info = info
+            if tab.id == selected { window?.title = tab.title }
+            if info.subagents > 0, teamShown.insert(info.id).inserted { show(.team) }
+        }
+    }
+
+    /// ⌘Q with agents at work asks first; quitting ends every agent.
+    func quitAgents(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !agents.isEmpty else { return .terminateNow }
+        if agents.contains(where: \.busy) {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "Agents are still running. Quit anyway?")
+            alert.addButton(withTitle: String(localized: "Quit"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        }
+        let tabs = agents
+        Task {
+            for t in tabs {
+                t.terminal?.terminate(grace: 0)
+                if let s = t.session, t.terminal == nil { try? await host.close(s) }
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     // MARK: Window
@@ -432,7 +606,7 @@ import UniformTypeIdentifiers
     /// ⌘W reaching the window itself (the standard Close item) closes one tab, not all of them,
     /// and the window once it has none; the red button closes the window.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard NSApp.currentEvent?.type == .keyDown, !files.isEmpty else { return true }
+        guard NSApp.currentEvent?.type == .keyDown, tabCount > 0 else { return true }
         closeCurrent()
         return false
     }
@@ -446,7 +620,7 @@ import UniformTypeIdentifiers
         current?.page.markRead()
         if !quitting {
             files.removeAll() // stops every tab's watcher
-            selected = nil
+            selected = agents.first?.id // agents keep running: the Dock brings their tabs back
             save()
         }
         window?.contentView = nil
@@ -496,10 +670,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let reply = Store.shared.quitAgents(sender)
+        guard reply != .terminateCancel else { return reply }
         Store.shared.quitting = true // keep the open files for next launch
         Store.shared.current?.page.markRead()
         Baseline.queue.sync {} // its write lands before the app ends
-        return .terminateNow
+        return reply
     }
 }
 
@@ -571,6 +747,7 @@ struct ReaderView: View {
                 .animation(reduceMotion ? nil : .smooth, value: store.immersive)
         }
         .overlay { TipLayer() }
+        .sheet(isPresented: $store.newAgentOpen) { NewAgentSheet(store: store) }
         .coordinateSpace(.named(Tips.space))
         // The page runs to the top of the window and scrolls under the floating capsules;
         // render.js pads its first line below them.
@@ -585,7 +762,15 @@ struct ReaderView: View {
             ForEach(store.files.filter(\.shown)) { f in
                 MarkdownView(text: f.text, stamp: f.stamp, fileURL: f.url, reading: reading, page: f.page, active: f.id == store.selected)
             }
-            if store.files.isEmpty {
+            if let agent = store.currentAgent {
+                Group {
+                    if let terminal = agent.terminal { TerminalTabView(terminal: terminal, top: store.header) }
+                    else { ChatView(tab: agent, store: store, ink: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted"))) }
+                }
+                .id(agent.id)
+                .background(Color(nsColor: ground))
+            }
+            if store.tabCount == 0 {
                 NoDocument(store: store, text: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted")))
                     .padding(.top, store.header)
             }
@@ -643,7 +828,7 @@ struct TitleStrip: View {
             .frame(height: Self.capsule)
             .glassCapsule()
             .fixedSize()
-            if !store.files.isEmpty {
+            if store.tabCount > 0 {
                 TabStrip(store: store)
                     .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
             }
@@ -770,6 +955,7 @@ struct TabStrip: View {
     private var row: some View {
         HStack(spacing: 0) {
             ForEach(store.files) { FileTab(file: $0, store: store).id($0.id) }
+            ForEach(store.agents) { AgentTabButton(tab: $0, store: store).id($0.id) }
         }
         .padding(.horizontal, 4)
     }

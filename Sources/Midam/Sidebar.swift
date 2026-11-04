@@ -597,6 +597,9 @@ struct Sidebar: View {
                 .disabled(doc.deleted)
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url(for: doc)]) }
                     .disabled(doc.deleted)
+                if let s = library.session(for: library.url(for: doc).path), s.agent == .claude {
+                    Button("Resume the Session That Wrote This") { Store.shared.openAgent(project: s.cwd, resume: s.id) }
+                }
                 if doc.deleted {
                     Divider()
                     Button("Remove from List") { library.dismiss(doc) }

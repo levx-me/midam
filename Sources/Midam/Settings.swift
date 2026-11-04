@@ -15,6 +15,7 @@ enum Pref {
     static let theme = "theme"            // Theme raw value: the appearance (모양), not a colour theme
     static let lightTheme = "lightColorTheme" // ColorTheme id for the light appearance
     static let darkTheme = "darkColorTheme"   // ColorTheme id for the dark appearance
+    static let agentTerminal = "agentTerminal" // Show as Terminal: new agents open as a terminal tab
     static let all = [font, codeFont, size, tracking, leading, paragraph, measure, theme, lightTheme, darkTheme]
 
     @MainActor static func reset() {
@@ -882,6 +883,7 @@ private struct PrimaryButton: ViewModifier {
 }
 
 struct GeneralSettings: View {
+    @AppStorage(Pref.agentTerminal) private var agentTerminal = false
     @AppStorage(Pref.size) private var size = Knob.size.initial
     @AppStorage(Pref.tracking) private var tracking = Spacing.normal
     @AppStorage(Pref.leading) private var leading = Spacing.normal
@@ -900,6 +902,12 @@ struct GeneralSettings: View {
                 PresetPicker(spacing: .measure, index: $measure).pickerStyle(.segmented)
             }
             LanguageSection()
+            Section {
+                Toggle("Show as Terminal", isOn: $agentTerminal)
+                Text("New agents open in a terminal instead of a conversation. For people used to the command line.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color(nsColor: .muted))
+            }
             HiddenProjectsSection()
             CacheSection()
             CommandLineSection()

@@ -1,11 +1,11 @@
 import SwiftUI
 
-// The right panel: find in the page, the table of contents, the keyboard shortcuts and the reply, one tab
+// The right panel: find in the page, the table of contents, the keyboard shortcuts, the reply and the team, one tab
 // at a time (Store.panelOpen, Store.panelTab). Docked beside the page as the sidebar is on the
 // left; floating over the page's right edge only when docking would leave the page too narrow.
 
 enum PanelTab: String, CaseIterable {
-    case find, toc, shortcuts, reply
+    case find, toc, shortcuts, reply, team
 
     var title: LocalizedStringKey {
         switch self {
@@ -13,6 +13,7 @@ enum PanelTab: String, CaseIterable {
         case .toc: "Contents"
         case .shortcuts: "Shortcuts"
         case .reply: "Reply"
+        case .team: "Team"
         }
     }
 
@@ -22,6 +23,7 @@ enum PanelTab: String, CaseIterable {
         case .toc: return "list.bullet.indent"
         case .shortcuts: return "command"
         case .reply: return "arrowshape.turn.up.left"
+        case .team: return "person.3"
         }
     }
 
@@ -31,6 +33,7 @@ enum PanelTab: String, CaseIterable {
         case .toc: [.tableOfContents]
         case .shortcuts: [.shortcuts]
         case .reply: [.addNote]
+        case .team: []
         }
     }
 }
@@ -105,6 +108,7 @@ private struct PanelBody: View {
             Divider()
             Group {
                 if store.panelTab == .shortcuts { ShortcutsList() }
+                else if store.panelTab == .team { TeamPanel(store: store) }
                 else if let page = store.current?.page {
                     if store.panelTab == .find { FindTab(page: page).id(ObjectIdentifier(page)) } // each tab its own field
                     else if store.panelTab == .reply { ReplyTab(page: page).id(ObjectIdentifier(page)) }
@@ -176,7 +180,7 @@ private struct PanelTabButton: View {
         .accessibilityLabel(tab.title)
         .accessibilityHint(Text(verbatim: glyphs))
         .accessibilityAddTraits(on ? .isSelected : [])
-        .fastTip(Text(tab.title) + Text(verbatim: " (\(glyphs))"))
+        .fastTip(glyphs.isEmpty ? Text(tab.title) : Text(tab.title) + Text(verbatim: " (\(glyphs))"))
     }
 }
 

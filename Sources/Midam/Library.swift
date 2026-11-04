@@ -37,17 +37,45 @@ struct KnownDoc: Codable, Hashable, Sendable { var title: String; var modified: 
 struct LibraryState: Sendable {
     var opened: [String: Date] = [:]        // resolved path → last time a tab showed it
     var pinned: [String] = []               // pinned project ids, in the user's order
-    var hidden: Set<String> = []            // project ids hidden from the sidebar (Settings restores them)
-    var hiddenPins: [String: Int] = [:]     // hidden project id → its place in the pins when hidden
-    var added: Set<String> = []             // project ids collected from all history, not only the window
+    var added: Set<String> = []             // the registry: project ids the user registered (LibraryModel.register)
     var overrides: [String: DocKind] = [:]  // doc id → kind the user chose
     var dismissed: Set<String> = []         // deleted doc ids the user cleared
     var known: [String: KnownDoc] = [:]     // doc id → last seen on disk
     var modelKinds: [String: String] = [:]  // modelKey → DocKind raw value, "" when the model had no answer
 }
 
-/// A .md file a source says an agent wrote, and the project it belongs to.
-struct Hit: Hashable, Sendable { let path: String; let project: String }
+/// A .md file a source says an agent wrote, the project it belongs to, and the session that wrote it.
+struct Hit: Hashable, Sendable { let path: String; let project: String; var session: WritingSession? = nil }
+
+/// The agent session that wrote a document, for "Resume the session that wrote this".
+struct WritingSession: Codable, Hashable, Sendable {
+    let agent: Agent
+    let id: String
+    let cwd: String  // where the session ran: `claude --resume` looks sessions up by this folder
+
+    /// Agent session ids are UUIDs; only this shape is ever put on a command line (a leading "-"
+    /// would read as an option).
+    static func isValidID(_ id: String) -> Bool {
+        (1...128).contains(id.utf8.count) && id.first != "-"
+            && id.utf8.allSatisfy { $0 == 45 || (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }
+    }
+
+    /// `~/.claude/projects/<slug>/<id>.jsonl`; a subagent's `<slug>/<id>/subagents/agent-….jsonl`
+    /// belongs to its parent session `<id>`.
+    static func claude(transcript: String, cwd: String?) -> WritingSession? {
+        let parts = transcript.split(separator: "/")
+        guard let cwd, let file = parts.last, file.hasSuffix(".jsonl") else { return nil }
+        let id = parts.count >= 3 && parts[parts.count - 2] == "subagents" ? String(parts[parts.count - 3]) : String(file.dropLast(6))
+        return isValidID(id) ? WritingSession(agent: .claude, id: id, cwd: cwd) : nil
+    }
+
+    /// `~/.codex/sessions/…/rollout-<date>-<uuid>.jsonl`: the uuid is the session_meta id.
+    static func codex(rollout: String, cwd: String) -> WritingSession? {
+        let stem = ((rollout as NSString).lastPathComponent as NSString).deletingPathExtension
+        let id = String(stem.suffix(36))
+        return stem.count > 36 && UUID(uuidString: id) != nil ? WritingSession(agent: .codex, id: id, cwd: cwd) : nil
+    }
+}
 
 /// A document as scanned, before the user's state (overrides, opens, dismissals) is applied.
 struct DocInfo: Codable, Hashable, Sendable {
@@ -62,6 +90,8 @@ struct DocInfo: Codable, Hashable, Sendable {
     let modelKey: String?       // "path|mtime" for the Foundation Models cache; nil when fixedKind decides
     var excerpt: String         // for the model only; never written to the cache
     let deleted: Bool
+    var session: WritingSession? = nil // the newest that wrote it; absent in caches from before (the rescan fills it)
+    var sessions: [WritingSession]? = nil // every session that wrote it, newest first; absent in older caches
 }
 
 /// Where and when to scan; tests pass their own home, exclusions and clock.
@@ -70,7 +100,6 @@ struct ScanEnv: Sendable {
     /// Entries starting with "/" are path prefixes; anything else excludes paths containing it.
     var excluded: [String]
     var now: Date
-    var window: TimeInterval = 7 * 86_400
 
     static func standard(now: Date = Date()) -> ScanEnv {
         ScanEnv(home: NSHomeDirectory(), excluded: Library.defaultExcluded(), now: now)
@@ -310,7 +339,7 @@ enum Library {
         var byProject: [String: [LibraryDoc]] = [:]
         var lastRead: [String: Date] = [:]
         for i in infos {
-            if (i.deleted && state.dismissed.contains(i.id)) || state.hidden.contains(i.project) { continue }
+            if i.deleted && state.dismissed.contains(i.id) { continue }
             let doc = LibraryDoc(id: i.id, variants: i.variants, langLabel: langLabel(i.variants), title: i.title,
                                  folder: i.folder, modified: i.modified, kind: kind(i, state: state), deleted: i.deleted,
                                  unread: !i.deleted && unread(i.variants, modified: i.modified, opened: state.opened))
@@ -372,16 +401,12 @@ extension Library {
         return ids
     }
 
-    /// `id` pinned again at `slot` (where it was before it was hidden), the bottom if that place is gone.
-    static func restorePin(_ id: String, at slot: Int, in pinned: [String]) -> [String] {
-        guard !pinned.contains(id) else { return pinned }
-        var ids = pinned
-        ids.insert(id, at: min(max(slot, 0), ids.count))
-        return ids
+    /// The documents `session` wrote, newest first (a session's id is unique across agents).
+    static func docs(ofSession id: String, in infos: [DocInfo]) -> [DocInfo] {
+        infos.filter { i in !i.deleted && (i.sessions ?? i.session.map { [$0] } ?? []).contains { $0.id == id } }
+            .sorted { $0.modified > $1.modified }
     }
 
-    /// A pinned project `by` one place (−1 up, +1 down) among the `listed` ones (a pin whose
-    /// project is not listed now keeps its place); unchanged at either end.
     static func movePinned(_ id: String, by d: Int, in pinned: [String], listed: Set<String>) -> [String] {
         guard let i = pinned.firstIndex(of: id) else { return pinned }
         var j = i + d
@@ -583,9 +608,10 @@ struct LibraryCache: Codable, Sendable {
     }
 }
 
-/// The agents whose history Midam reads. Another history source adds a case here, its reader
-/// in LibraryScanner, and its entry in `LibraryScanner.candidates`.
-enum Agent: String, CaseIterable, Sendable { case claude, codex }
+/// The agent CLIs Midam knows. It reads the history of claude and codex; another history source
+/// adds its reader in LibraryScanner and its entry in `LibraryScanner.candidates`. Cursor leaves
+/// no history Midam reads: it is here for the agent terminal tabs (AgentSessions.swift).
+enum Agent: String, CaseIterable, Codable, Sendable { case claude, codex, cursor }
 
 /// A project found in an agent's history (any age), for the Add Project sheet.
 struct ProjectCandidate: Identifiable, Hashable, Sendable {
@@ -625,14 +651,13 @@ final class LibraryScanner {
 
     // MARK: Sources
 
-    /// `~/.claude/projects/*/*.jsonl` and their subagents' `*/*/subagents/*.jsonl`, changed within
-    /// the window (any age for a project in `added`), newest first.
-    func claudeTranscripts(added: Set<String> = []) -> [String] {
+    /// `~/.claude/projects/*/*.jsonl` and their subagents' `*/*/subagents/*.jsonl` of the registered
+    /// projects, any age, newest first.
+    func claudeTranscripts(registered: Set<String>) -> [String] {
         var out: [(String, Date)] = []
         for dir in claudeSlugs() {
             let all = claudeFiles(dir)
-            let keepAll = !added.isEmpty && slugRoot(all).map(added.contains) == true
-            out += all.filter { keepAll || env.now.timeIntervalSince($0.1) <= env.window }
+            if slugRoot(all).map(registered.contains) == true { out += all }
         }
         return out.sorted { $0.1 > $1.1 }.map(\.0)
     }
@@ -680,13 +705,9 @@ final class LibraryScanner {
         ((try? fm.contentsOfDirectory(atPath: claudeDir + "/projects")) ?? []).filter { !$0.hasPrefix(".") }.count
     }
 
-    /// `~/.codex/sessions/**/*.jsonl` changed within the window (any age for a session whose cwd
-    /// is in a project in `added`), newest first.
-    func codexSessions(added: Set<String> = []) -> [String] {
-        codexFiles().filter { p, m in
-            env.now.timeIntervalSince(m) <= env.window
-                || (!added.isEmpty && codexSession(p).flatMap { sessionRoot($0.cwd) }.map(added.contains) == true)
-        }.map(\.0)
+    /// `~/.codex/sessions/**/*.jsonl` whose cwd is in a registered project, any age, newest first.
+    func codexSessions(registered: Set<String>) -> [String] {
+        codexFiles().filter { p, _ in codexSession(p).flatMap { sessionRoot($0.cwd) }.map(registered.contains) == true }.map(\.0)
     }
 
     private func codexFiles() -> [(String, Date)] {
@@ -756,7 +777,8 @@ final class LibraryScanner {
         mark.mtime = st.mtime
         marks.transcripts[transcript] = mark
         let fileCwd = mark.cwd ?? tailCwd
-        return (mark.found + tail).compactMap { hit($0.path, cwd: $0.cwd ?? fileCwd) }
+        let session = WritingSession.claude(transcript: transcript, cwd: fileCwd)
+        return (mark.found + tail).compactMap { hit($0.path, cwd: $0.cwd ?? fileCwd, session: session) }
     }
 
     /// The file from `offset` on (mapped when whole); empty when nothing follows it.
@@ -819,9 +841,10 @@ final class LibraryScanner {
     func codexHits(_ session: String) -> [Hit] {
         guard let s = codexSession(session), s.cwd != env.home, s.cwd != "/", !isExcluded(s.cwd + "/") else { return [] }
         let from = s.start.addingTimeInterval(-60), to = s.end.addingTimeInterval(60)
+        let writer = WritingSession.codex(rollout: session, cwd: s.cwd)
         var out: [Hit] = []
         walk(s.cwd, skip: { $0.hasPrefix(".") || ["node_modules", "build", "dist"].contains($0) }) { path, m in
-            if m >= from && m <= to, let h = hit(path, cwd: s.cwd) { out.append(h) }
+            if m >= from && m <= to, let h = hit(path, cwd: s.cwd, session: writer) { out.append(h) }
         }
         return out
     }
@@ -891,13 +914,13 @@ final class LibraryScanner {
     // MARK: Projects
 
     /// A hit for a written path, or nil when it is excluded.
-    func hit(_ raw: String, cwd: String?) -> Hit? {
+    func hit(_ raw: String, cwd: String?, session: WritingSession? = nil) -> Hit? {
         var path = raw
         if !path.hasPrefix("/"), let cwd { path = cwd + "/" + path }
         guard path.hasPrefix("/") else { return nil }
         path = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
         guard !isExcluded(path) else { return nil }
-        return Hit(path: path, project: project(path, cwd: cwd))
+        return Hit(path: path, project: project(path, cwd: cwd), session: session)
     }
 
     /// The file's repo root; outside a repo (and anything under ~/.claude), the writing session's project.
@@ -935,14 +958,21 @@ final class LibraryScanner {
 
     // MARK: Documents
 
-    /// Hits into documents. The first hit of a path decides its project, so pass the newest sources first.
-    /// A missing path shows as deleted only when a previous scan knew it.
+    /// Hits into documents. The first hit of a path decides its project and writing session, so
+    /// pass the newest sources first. A missing path shows as deleted only when a previous scan knew it.
+    // ponytail: "newest" holds per agent (the scan lists all Claude sources before Codex ones), so a
+    // doc both wrote resumes Claude. Merge the sources by mtime if that matters.
     func docs(_ hits: [Hit], known: [String: KnownDoc]) -> [DocInfo] {
         var projectOf: [String: String] = [:]
         var variantsOf: [String: [DocVariant]] = [:]
-        for h in hits where projectOf[h.path] == nil {
-            projectOf[h.path] = h.project
+        var sessionOf: [String: WritingSession] = [:]
+        var sessionsOf: [String: [WritingSession]] = [:]
+        for h in hits {
             let (id, lang) = Library.split(h.path)
+            if let s = h.session, !(sessionsOf[id] ?? []).contains(s) { sessionsOf[id, default: []].append(s) } // every writer, newest first
+            guard projectOf[h.path] == nil else { continue }
+            projectOf[h.path] = h.project
+            if sessionOf[id] == nil { sessionOf[id] = h.session }
             variantsOf[id, default: []].append(DocVariant(lang: lang, path: h.path))
         }
         var out: [DocInfo] = []
@@ -955,7 +985,7 @@ final class LibraryScanner {
             guard let main = present.first else {
                 if let k = known[id] {
                     out.append(DocInfo(id: id, project: project, variants: sorted, modified: k.modified, title: k.title, folder: folder,
-                                       fixedKind: k.kind, ruleKind: k.kind, modelKey: nil, excerpt: "", deleted: true))
+                                       fixedKind: k.kind, ruleKind: k.kind, modelKey: nil, excerpt: "", deleted: true, session: sessionOf[id], sessions: sessionsOf[id]))
                 }
                 continue
             }
@@ -968,7 +998,7 @@ final class LibraryScanner {
             out.append(DocInfo(id: id, project: project, variants: present.map(\.0), modified: present.map(\.1).max()!,
                                title: title, folder: folder, fixedKind: fixed, ruleKind: rule,
                                modelKey: fixed == nil ? "\(main.0.path)|\(Int(main.1.timeIntervalSince1970))" : nil,
-                               excerpt: head.excerpt, deleted: false))
+                               excerpt: head.excerpt, deleted: false, session: sessionOf[id], sessions: sessionsOf[id]))
         }
         return out
     }

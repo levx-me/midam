@@ -191,6 +191,7 @@ extension Agent {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .cursor: return "Cursor"
         }
     }
 }
