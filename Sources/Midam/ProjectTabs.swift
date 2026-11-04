@@ -9,6 +9,8 @@ struct AgentTabSave: Codable, Equatable {
     var session: String?
     var project: String
     var terminal = false
+    /// The project's preview (its address) rather than a conversation.
+    var preview: String?
 }
 
 /// One project's tabs: document paths, then agents; `selected` indexes that combined order.

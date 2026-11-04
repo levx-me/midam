@@ -356,3 +356,11 @@
 "1 subagent" = "1 subagent";
 "%lld subagents" = "%lld subagents";
 "Context %lld%% full" = "Context %lld%% full";
+/* Preview tab */
+"The preview isn't running" = "The preview isn't running";
+"Ask the agent to start it, then reload." = "Ask the agent to start it, then reload.";
+"Page Width" = "Page Width";
+"Desktop" = "Desktop";
+"Tablet" = "Tablet";
+"Phone" = "Phone";
+"New" = "New";

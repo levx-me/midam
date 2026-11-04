@@ -358,3 +358,11 @@
 "1 subagent" = "하위 에이전트 1개";
 "%lld subagents" = "하위 에이전트 %lld개";
 "Context %lld%% full" = "컨텍스트 %lld%% 사용";
+/* Preview tab */
+"The preview isn't running" = "미리보기가 실행 중이 아니에요";
+"Ask the agent to start it, then reload." = "에이전트에게 실행해 달라고 한 다음 새로 고침하세요.";
+"Page Width" = "화면 너비";
+"Desktop" = "데스크톱";
+"Tablet" = "태블릿";
+"Phone" = "휴대폰";
+"New" = "새로 열림";

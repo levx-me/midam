@@ -6,7 +6,8 @@ import SwiftUI
 // answer. Everything goes through Store.host (AgentHost); no process or path is touched here.
 // With Settings > Show as Terminal on, a new agent opens as the V5 terminal tab instead.
 
-/// One agent tab: a conversation (session) or, in terminal mode, a terminal.
+/// One agent tab: a conversation (session), in terminal mode a terminal, or the project's preview
+/// of what its agents' dev server shows.
 @MainActor final class AgentTab: ObservableObject, Identifiable {
     let id = UUID()
     /// The AgentHost session; nil for a terminal started fresh (it never learns its id).
@@ -15,31 +16,35 @@ import SwiftUI
     /// The project whose tab strip holds it (a registered root; `project` may sit inside it).
     let group: String
     let terminal: AgentTerminal?
+    let preview: PreviewPage?
     /// Opened on earlier history: worth restoring even before its items arrive.
     var resumable = false
     @Published var items: [ChatItem] = []
     @Published var info: SessionInfo?
     @Published var draft = ""
-    /// A turn finished while another tab was in front: "done" until the tab is shown.
+    /// Something new while another tab was in front (a finished turn, a preview opened in the
+    /// background): "done" or a dot until the tab is shown.
     @Published var unseen = false
 
-    init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil) {
+    init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil, preview: PreviewPage? = nil) {
         self.session = session
         self.project = project
         self.group = group ?? project
         self.terminal = terminal
+        self.preview = preview
     }
 
     var projectName: String { (project as NSString).lastPathComponent }
     var title: String {
         if let terminal { return terminal.title }
+        if preview != nil { return String(localized: "Preview") }
         return info?.topic ?? String(format: String(localized: "Claude · %@"), projectName)
     }
     var state: Conversation.State { info?.state ?? .notStarted }
     /// A turn runs or waits for the person: closing or quitting asks first.
     var busy: Bool { terminal?.isRunning ?? (state == .working || state == .blocked) }
     var waiting: Bool { state == .blocked }
-    var save: AgentTabSave { AgentTabSave(session: session, project: project, terminal: terminal != nil) }
+    var save: AgentTabSave { AgentTabSave(session: session, project: project, terminal: terminal != nil, preview: preview?.url.absoluteString) }
 
     func upsert(_ item: ChatItem) {
         if let i = items.firstIndex(where: { $0.id == item.id }) { items[i] = item } else { items.append(item) }
@@ -507,7 +512,7 @@ struct AgentTabButton: View {
         let on = store.selected == tab.id
         Button { store.select(tab) } label: {
             HStack(spacing: 5) {
-                Image(systemName: tab.terminal == nil ? "bubble.left.and.text.bubble.right" : "apple.terminal")
+                Image(systemName: tab.preview != nil ? "safari" : tab.terminal == nil ? "bubble.left.and.text.bubble.right" : "apple.terminal")
                     .font(.system(size: 12))
                     .foregroundStyle(GlassLabel.style(strong: false, opaque: reduceTransparency))
                 Text(verbatim: tab.title)
@@ -515,9 +520,9 @@ struct AgentTabButton: View {
                     .foregroundStyle(GlassLabel.style(strong: on, opaque: reduceTransparency))
                     .lineLimit(1)
                     .frame(maxWidth: 220)
-                Circle().fill(tab.waiting ? Color.accentColor : Color.green)
+                Circle().fill(tab.waiting || tab.unseen ? Color.accentColor : Color.green)
                     .frame(width: 6, height: 6)
-                    .opacity(tab.waiting || tab.state == .working ? 1 : 0)
+                    .opacity(tab.waiting || tab.unseen || (tab.preview == nil && tab.state == .working) ? 1 : 0)
                 Color.clear.frame(width: 20, height: 20) // room for the ×
             }
             .padding(.leading, 11)
@@ -527,9 +532,9 @@ struct AgentTabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .fastTip(Text(verbatim: tab.title + " · " + tab.projectName) + (tab.waiting ? Text(verbatim: "\n") + Text("Waiting for you") : Text(verbatim: "")))
+        .fastTip(Text(verbatim: tab.title + " · " + (tab.preview?.url.absoluteString ?? tab.projectName)) + (tab.waiting ? Text(verbatim: "\n") + Text("Waiting for you") : Text(verbatim: "")))
         .accessibilityLabel(Text(verbatim: tab.title))
-        .accessibilityValue(tab.waiting ? Text("Waiting for you") : tab.state == .working ? Text("Working…") : Text(verbatim: ""))
+        .accessibilityValue(tab.unseen ? (tab.preview == nil ? Text("Done") : Text("New")) : tab.waiting ? Text("Waiting for you") : tab.state == .working ? Text("Working…") : Text(verbatim: ""))
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityAction(named: Text("Close Tab")) { store.close(tab) }
         .overlay(alignment: .trailing) {

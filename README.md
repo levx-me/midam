@@ -75,7 +75,7 @@ sh tools/cli-test.sh                            # the midam command's exit codes
 swiftc Sources/Midam/ProjectTabs.swift tools/ProjectTabsTest/main.swift -o /tmp/projecttabs && /tmp/projecttabs
 ```
 
-The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest`, `tools/ReplyTest`, `tools/ChatMarkdownTest`, `tools/AgentSessionsTest`, `tools/ConversationTest` (permission rules, launch flags, sandbox settings) and `tools/TeamTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
+The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest`, `tools/ReplyTest`, `tools/ChatMarkdownTest`, `tools/AgentSessionsTest`, `tools/ConversationTest` (permission rules, launch flags, sandbox settings), `tools/TeamTest` and `tools/PreviewTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
 
 ## Shortcuts
 

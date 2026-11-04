@@ -267,7 +267,9 @@ import UserNotifications
             Task { // conversations come back with their history, in order, without running
                 for (i, a) in s.agents.enumerated() {
                     let show = pick == s.files.count + i
-                    if a.terminal {
+                    if let url = a.preview.flatMap(URL.init(string:)) { // loads when first shown
+                        add(AgentTab(session: nil, project: a.project, group: root, preview: PreviewPage(url: url)), select: show)
+                    } else if a.terminal {
                         let tab = terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: a.project), sessionID: a.session), group: root)
                         add(tab, select: show)
                     } else if let session = a.session {
@@ -415,7 +417,7 @@ import UserNotifications
         all.current = project
         func tabs(_ files: [OpenFile], _ agents: [AgentTab], _ selected: UUID?) -> ProjectTabsSave {
             // A conversation nothing was said in yet has no history to resume: it is not kept.
-            let kept = agents.filter { $0.terminal != nil || $0.resumable || !$0.items.isEmpty }
+            let kept = agents.filter { $0.terminal != nil || $0.preview != nil || $0.resumable || !$0.items.isEmpty }
             let ids = files.map(\.id) + kept.map(\.id)
             return ProjectTabsSave(files: files.map(\.url.path), agents: kept.map(\.save), selected: selected.flatMap { ids.firstIndex(of: $0) })
         }
@@ -541,9 +543,10 @@ import UserNotifications
         switch event {
         case .item(let session, let item):
             guard let tab = allAgents.first(where: { $0.session == session }) else { return }
-            let first = tab.items.isEmpty
+            let first = tab.items.isEmpty, live = tab.state == .working // not history coming back
             tab.upsert(item)
             if first { save() } // now worth restoring
+            if live { previewSaw(item, in: tab) }
         case .info(let info):
             guard let tab = allAgents.first(where: { $0.session == info.id }) else { return }
             if info.state == .blocked, tab.state != .blocked {
@@ -556,6 +559,27 @@ import UserNotifications
             if tab.id == selected { window?.title = tab.title }
             if info.subagents > 0, tab.group == project, teamShown.insert(info.id).inserted { show(.team) }
         }
+    }
+
+    /// Dev server addresses seen in each project's conversations this run ("root url").
+    private var previewsSeen = Set<String>()
+
+    /// A turn showed a dev server's address: the project's one preview tab goes there, opened the
+    /// first time an address is seen (selected when the person is watching that conversation with
+    /// nothing typed, else in the background with a dot). A turn that edited files reloads it.
+    private func previewSaw(_ item: ChatItem, in tab: AgentTab) {
+        let preview = (tab.group == project ? agents : parked[tab.group]?.agents ?? []).first { $0.preview != nil }
+        if case .result = item.kind {
+            if PreviewDetector.edited(tab.items) { preview?.preview?.reload() }
+            return
+        }
+        guard let url = PreviewDetector.urls(in: item).last,
+              previewsSeen.insert(tab.group + " " + url.absoluteString).inserted else { return }
+        if let preview { return preview.preview?.go(url) ?? () }
+        let show = selected == tab.id && tab.draft.isEmpty
+        let new = AgentTab(session: nil, project: tab.group, group: tab.group, preview: PreviewPage(url: url))
+        new.unseen = !show
+        add(new, select: show)
     }
 
     /// ⌘Q with agents at work asks first; quitting ends every agent.
@@ -885,6 +909,7 @@ struct ReaderView: View {
             if let agent = store.currentAgent {
                 Group {
                     if let terminal = agent.terminal { TerminalTabView(terminal: terminal, top: store.header) }
+                    else if let preview = agent.preview { PreviewView(page: preview, top: store.header, ground: Color(nsColor: ground)) }
                     else { ChatView(tab: agent, store: store, ink: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted"))) }
                 }
                 .id(agent.id)
