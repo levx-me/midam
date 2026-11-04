@@ -35,8 +35,4 @@ assert(b == [
 // A fence still streaming in shows as code.
 assert(ChatMarkdown.blocks("Look:\n```\nhalf") == [.paragraph("Look:"), .code("half")])
 assert(ChatMarkdown.blocks("") == [])
-// Tabs restore from what was saved.
-let saved = [AgentTabSave(session: "abc", project: "/p"), AgentTabSave(session: nil, project: "/q", terminal: true)]
-let back = try! JSONDecoder().decode([AgentTabSave].self, from: JSONEncoder().encode(saved))
-assert(back == saved)
-print("chat markdown: 4 checks passed")
+print("chat markdown: 3 checks passed")

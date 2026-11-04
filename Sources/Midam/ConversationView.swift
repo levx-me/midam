@@ -12,14 +12,19 @@ import SwiftUI
     /// The AgentHost session; nil for a terminal started fresh (it never learns its id).
     let session: String?
     let project: String
+    /// The project whose tab strip holds it (a registered root; `project` may sit inside it).
+    let group: String
     let terminal: AgentTerminal?
+    /// Opened on earlier history: worth restoring even before its items arrive.
+    var resumable = false
     @Published var items: [ChatItem] = []
     @Published var info: SessionInfo?
     @Published var draft = ""
 
-    init(session: String?, project: String, terminal: AgentTerminal? = nil) {
+    init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil) {
         self.session = session
         self.project = project
+        self.group = group ?? project
         self.terminal = terminal
     }
 

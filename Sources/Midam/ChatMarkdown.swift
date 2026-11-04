@@ -54,11 +54,3 @@ enum ChatMarkdown {
         return out
     }
 }
-
-/// What an agent tab remembers across launches (UserDefaults "openAgents"): it comes back without
-/// running until the person sends (or, for a terminal, presses Restart).
-struct AgentTabSave: Codable, Equatable {
-    var session: String?
-    var project: String
-    var terminal = false
-}

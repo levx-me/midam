@@ -557,7 +557,10 @@ struct Sidebar: View {
     }
 
     private func syncSelection() {
-        guard let here = store.current?.url.resolvingSymlinksInPath().path, let id = library.docAtPath[here] else { state.selection = nil; return }
+        guard let here = store.current?.url.resolvingSymlinksInPath().path, let id = library.docAtPath[here] else {
+            state.selection = store.project.map { .project($0) } // a conversation: its project's row
+            return
+        }
         if state.selection != .doc(id) { state.selection = .doc(id) }
     }
 
@@ -579,6 +582,7 @@ struct Sidebar: View {
             }
         case .project(let id):
             state.expanded.formSymmetricDifference([id])
+            store.switchProject(id) // its tabs
         case .kind(let pid, let kind):
             state.expanded.formSymmetricDifference([pid + "\u{1F}" + kind.rawValue])
         }

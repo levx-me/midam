@@ -121,15 +121,18 @@ import UniformTypeIdentifiers
     @Published var findFocused = false
     @Published private(set) var recents: [URL] = NSDocumentController.shared.recentDocumentURLs
     var quitting = false
-    /// Last session's tabs, read before anything can overwrite them: files given at launch
-    /// (application(_:open:)) arrive before applicationDidFinishLaunching runs restore().
-    private let savedFiles = UserDefaults.standard.stringArray(forKey: Store.filesKey) ?? []
-    private let savedSelection = UserDefaults.standard.string(forKey: Store.selectedKey)
+    /// The project whose tabs show (a registered root); nil until something opens.
+    @Published private(set) var project: String?
+    /// Other projects' tabs opened this run, kept live: their agents go on working.
+    private var parked: [String: (files: [OpenFile], agents: [AgentTab], selected: UUID?)] = [:]
+    /// Last session's tabs of projects not opened yet this run, read before anything can overwrite
+    /// them: files given at launch (application(_:open:)) arrive before restore() runs.
+    private var savedTabs = Store.loadTabs()
     private var restored = false
 
     private var window: NSWindow?
     private var observers: [Any] = []
-    private static let filesKey = "openFiles", selectedKey = "selectedFile", agentsKey = "openAgents", frameName = "MidamMain"
+    private static let tabsKey = "projectTabs", frameName = "MidamMain"
 
     var current: OpenFile? { files.first { $0.id == selected } }
     var currentAgent: AgentTab? { agents.first { $0.id == selected } }
@@ -144,6 +147,7 @@ import UniformTypeIdentifiers
     /// Adds a tab for `url`, or selects it if that file is already open (by resolved path).
     func open(_ url: URL, fragment: String? = nil) {
         let url = url.standardizedFileURL
+        enterProject(of: url)
         if let open = file(at: url) {
             let hasView = open.shown
             select(open)
@@ -208,19 +212,88 @@ import UniformTypeIdentifiers
         recents = []
     }
 
-    /// Reopens the files that were open last time, ahead of any given at launch (which stay selected).
+    /// Shows last time's project with its tabs, unless a file given at launch chose one already.
     func restore() {
         guard !restored else { return }
         restored = true
-        let saved = savedFiles.map { URL(fileURLWithPath: $0) }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
-            .compactMap { file(at: $0) ?? load($0) } // a launch file already open keeps its object
-        let given = !files.isEmpty
-        files = mergeTabs(saved: saved, launched: files) { $0.url.resolvingSymlinksInPath().path }
-        if !given, let first = files.first { select(files.first { $0.url.path == savedSelection } ?? first, record: false) }
+        if project == nil, let last = savedTabs.current { switchProject(last, fillDefault: false) }
         save()
-        if !files.isEmpty { showWindow() }
-        restoreAgents()
+        if tabCount > 0 { showWindow() }
+    }
+
+    // MARK: Projects
+
+    private static func loadTabs() -> TabsSave {
+        let d = UserDefaults.standard
+        if let data = d.data(forKey: tabsKey), let saved = try? JSONDecoder().decode(TabsSave.self, from: data) { return saved }
+        let registered = LibraryModel.shared.registered
+        return TabsSave.migrate(files: d.stringArray(forKey: "openFiles") ?? [], selected: d.string(forKey: "selectedFile")) {
+            ProjectRoot.of(file: $0, registered: registered).root
+        }
+    }
+
+    /// A document's project becomes the current one: registered first (and shown in the sidebar)
+    /// when the document belonged to none.
+    private func enterProject(of url: URL) {
+        let r = ProjectRoot.of(file: url.path, registered: LibraryModel.shared.registered)
+        if !r.registered { SidebarState.shared.reveal = [r.root] }
+        switchProject(r.root, fillDefault: false)
+    }
+
+    /// Swaps the tab strip to `root`'s tabs: as left this run, else as saved last time, else (with
+    /// `fillDefault`) its conversation or newest document.
+    func switchProject(_ root: String, fillDefault: Bool = true) {
+        guard root != project else { return }
+        if let project {
+            if let here = current { // cheap: the shown page's place, taken by its next first render
+                let key = here.url.standardizedFileURL
+                here.page.scrollOffset { MarkdownView.Coordinator.pendingOffsets[key] = $0 }
+            }
+            parked[project] = (files, agents, selected)
+        }
+        project = root
+        if !LibraryModel.shared.registered.contains(root) { LibraryModel.shared.register(root: root) }
+        selected = nil
+        if let p = parked.removeValue(forKey: root) {
+            files = p.files
+            agents = p.agents
+            if let id = p.selected { select(id: id, record: false) }
+        } else if let s = savedTabs.projects.removeValue(forKey: root) {
+            files = s.files.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }.compactMap(load)
+            agents = []
+            let pick = s.selected ?? 0
+            if files.indices.contains(pick) { select(files[pick], record: false) }
+            Task { // conversations come back with their history, in order, without running
+                for (i, a) in s.agents.enumerated() {
+                    let show = pick == s.files.count + i
+                    if a.terminal {
+                        let tab = terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: a.project), sessionID: a.session), group: root)
+                        add(tab, select: show)
+                    } else if let session = a.session {
+                        await openChat(project: a.project, group: root, resume: session, select: show)
+                    }
+                }
+                if project == root, selected == nil, let first = files.first { select(first, record: false) }
+            }
+        } else {
+            files = []
+            agents = []
+            if fillDefault {
+                if let c = host.conversations(project: root).last(where: { $0.sessionID != nil }) {
+                    Task { await openChat(project: root, group: root, resume: c.sessionID, select: true) }
+                } else if let doc = LibraryModel.shared.projects.first(where: { $0.id == root })?.groups.flatMap(\.docs)
+                            .filter({ !$0.deleted }).max(by: { $0.modified < $1.modified }),
+                          let f = load(LibraryModel.shared.url(for: doc)) {
+                    files = [f]
+                    select(f, record: false)
+                }
+            }
+        }
+        if selected == nil {
+            window?.title = (root as NSString).lastPathComponent
+            window?.representedURL = nil
+        }
+        save()
     }
 
     /// The Dock icon was clicked, or the app launched with nothing to open: show the window,
@@ -314,6 +387,7 @@ import UniformTypeIdentifiers
     /// Shows a place from the history: its tab, opened again if it was closed, scrolled back.
     private func go(_ spot: Spot) {
         let url = URL(fileURLWithPath: spot.path).standardizedFileURL
+        enterProject(of: url)
         var target = file(at: url)
         if target == nil, let reopened = load(url) {
             files.append(reopened)
@@ -336,12 +410,33 @@ import UniformTypeIdentifiers
 
     private func save() {
         guard restored else { return } // until restore() has read last session's tabs
-        let d = UserDefaults.standard
-        d.set(files.map(\.url.path), forKey: Self.filesKey)
-        d.set(current?.url.path, forKey: Self.selectedKey)
-        // A conversation nothing was said in yet has no history to resume: it is not kept.
-        let keep = agents.filter { $0.terminal != nil || !$0.items.isEmpty }.map(\.save)
-        d.set(try? JSONEncoder().encode(keep), forKey: Self.agentsKey)
+        var all = savedTabs
+        all.current = project
+        func tabs(_ files: [OpenFile], _ agents: [AgentTab], _ selected: UUID?) -> ProjectTabsSave {
+            // A conversation nothing was said in yet has no history to resume: it is not kept.
+            let kept = agents.filter { $0.terminal != nil || $0.resumable || !$0.items.isEmpty }
+            let ids = files.map(\.id) + kept.map(\.id)
+            return ProjectTabsSave(files: files.map(\.url.path), agents: kept.map(\.save), selected: selected.flatMap { ids.firstIndex(of: $0) })
+        }
+        for (root, p) in parked { all.projects[root] = tabs(p.files, p.agents, p.selected) }
+        if let project { all.projects[project] = tabs(files, agents, selected) }
+        UserDefaults.standard.set(try? JSONEncoder().encode(all), forKey: Self.tabsKey)
+    }
+
+    /// Agents of every project opened this run.
+    private var allAgents: [AgentTab] { agents + parked.values.flatMap(\.agents) }
+
+    /// Into its project's strip: the current one, else that project's parked tabs.
+    private func add(_ tab: AgentTab, select show: Bool) {
+        if tab.group == project {
+            agents.append(tab)
+            if show { select(tab) } else { save() }
+        } else if parked[tab.group] != nil {
+            parked[tab.group]?.agents.append(tab)
+        } else {
+            parked[tab.group] = ([], [tab], tab.id) // its project was never shown this run
+            savedTabs.projects[tab.group] = nil
+        }
     }
 
     // MARK: Agents
@@ -350,53 +445,36 @@ import UniformTypeIdentifiers
     /// earlier session; as a terminal tab instead when Settings > Show as Terminal is on.
     func openAgent(project: String, resume: String?) {
         showWindow()
+        let root = ProjectRoot.of(file: project, registered: LibraryModel.shared.registered, isFolder: true)
+        if !root.registered { SidebarState.shared.reveal = [root.root] }
+        switchProject(root.root, fillDefault: false)
         if let resume, let open = agents.first(where: { $0.session == resume }) { return select(open) }
         if UserDefaults.standard.bool(forKey: Pref.agentTerminal) {
-            let tab = terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: project), sessionID: resume))
+            let tab = terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: project), sessionID: resume), group: root.root)
             tab.terminal?.start()
-            agents.append(tab)
-            return select(tab)
+            return add(tab, select: true)
         }
-        Task { await openChat(project: project, resume: resume, select: true) }
+        Task { await openChat(project: project, group: root.root, resume: resume, select: true) }
     }
 
-    @discardableResult private func openChat(project: String, resume: String?, select show: Bool) async -> AgentTab? {
+    private func openChat(project: String, group: String, resume: String?, select show: Bool) async {
         listen()
         do {
             let session = try await host.open(project: project, resume: resume)
-            let tab = AgentTab(session: session, project: project)
-            agents.append(tab)
-            if show { select(tab) }
+            let tab = AgentTab(session: session, project: project, group: group)
+            tab.resumable = resume != nil
+            add(tab, select: show)
             for item in (try? await host.items(session)) ?? [] { tab.upsert(item) }
             tab.info = try? await host.info(session)
-            return tab
         } catch {
             NSApp.presentError(error)
-            return nil
         }
     }
 
-    private func terminalTab(_ state: TerminalTabState) -> AgentTab {
+    private func terminalTab(_ state: TerminalTabState, group: String) -> AgentTab {
         let t = AgentTerminal(state)
         t.openLink = { [weak self] url, _ in self?.open(url) }
-        return AgentTab(session: state.sessionID, project: state.project.path, terminal: t)
-    }
-
-    /// Last session's agent tabs, back without running: conversations show their history.
-    private func restoreAgents() {
-        guard let data = UserDefaults.standard.data(forKey: Self.agentsKey),
-              let saved = try? JSONDecoder().decode([AgentTabSave].self, from: data), !saved.isEmpty else { return }
-        Task {
-            for s in saved {
-                if s.terminal {
-                    agents.append(terminalTab(TerminalTabState(agent: .claude, project: URL(fileURLWithPath: s.project), sessionID: s.session)))
-                } else if let session = s.session {
-                    await openChat(project: s.project, resume: session, select: false)
-                }
-            }
-            if selected == nil, let first = agents.first { select(first, record: false) }
-            showWindow()
-        }
+        return AgentTab(session: state.sessionID, project: state.project.path, group: group, terminal: t)
     }
 
     func select(_ tab: AgentTab, record: Bool = true) {
@@ -430,7 +508,8 @@ import UniformTypeIdentifiers
         Task {
             try? await host.close(s)
             guard let session = try? await host.open(project: tab.project, resume: s) else { return }
-            let fresh = AgentTab(session: session, project: tab.project)
+            let fresh = AgentTab(session: session, project: tab.project, group: tab.group)
+            fresh.resumable = true
             fresh.draft = tab.draft
             if agents.indices.contains(i), agents[i].id == tab.id { agents[i] = fresh } else { agents.append(fresh) }
             select(fresh, record: false)
@@ -452,32 +531,32 @@ import UniformTypeIdentifiers
     private func route(_ event: HostEvent) {
         switch event {
         case .item(let session, let item):
-            guard let tab = agents.first(where: { $0.session == session }) else { return }
+            guard let tab = allAgents.first(where: { $0.session == session }) else { return }
             let first = tab.items.isEmpty
             tab.upsert(item)
             if first { save() } // now worth restoring
         case .info(let info):
-            guard let tab = agents.first(where: { $0.session == info.id }) else { return }
+            guard let tab = allAgents.first(where: { $0.session == info.id }) else { return }
             if info.state == .blocked, tab.state != .blocked {
                 AccessibilityNotification.Announcement(String(localized: "Waiting for you")).post()
             }
             tab.info = info
             if tab.id == selected { window?.title = tab.title }
-            if info.subagents > 0, teamShown.insert(info.id).inserted { show(.team) }
+            if info.subagents > 0, tab.group == project, teamShown.insert(info.id).inserted { show(.team) }
         }
     }
 
     /// ⌘Q with agents at work asks first; quitting ends every agent.
     func quitAgents(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !agents.isEmpty else { return .terminateNow }
-        if agents.contains(where: \.busy) {
+        let tabs = allAgents
+        guard !tabs.isEmpty else { return .terminateNow }
+        if tabs.contains(where: \.busy) {
             let alert = NSAlert()
             alert.messageText = String(localized: "Agents are still running. Quit anyway?")
             alert.addButton(withTitle: String(localized: "Quit"))
             alert.addButton(withTitle: String(localized: "Cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
         }
-        let tabs = agents
         Task {
             for t in tabs {
                 t.terminal?.terminate(grace: 0)

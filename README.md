@@ -72,7 +72,7 @@ for t in tools/*-test.js; do node "$t"; done   # rendering, math, diagrams, font
 python3 tools/theme-contrast.py                 # WCAG AA for every theme
 python3 tools/strings-audit.py                  # en/ko strings complete
 sh tools/cli-test.sh                            # the midam command's exit codes
-swiftc Sources/Midam/TabOrder.swift tools/TabOrderTest/main.swift -o /tmp/taborder && /tmp/taborder
+swiftc Sources/Midam/ProjectTabs.swift tools/ProjectTabsTest/main.swift -o /tmp/projecttabs && /tmp/projecttabs
 ```
 
 The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest`, `tools/LibraryTest`, `tools/BaselineTest`, `tools/ChangeCountTest`, `tools/ReplyTest`, `tools/ChatMarkdownTest`, `tools/AgentSessionsTest`, `tools/ConversationTest` (permission rules, launch flags, sandbox settings) and `tools/TeamTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
