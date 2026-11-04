@@ -6,6 +6,7 @@ import SwiftUI
 /// them out of text fields and other windows.
 extension KeyboardShortcut {
     static let open = KeyboardShortcut("o")
+    static let newTab = KeyboardShortcut("t") // into the sidebar's list, as a browser's new tab; ⇧⌘T is kept for reopening a closed tab
     static let closeTab = KeyboardShortcut("w")
     static let closeTabX = KeyboardShortcut("x", modifiers: []) // as in Vimium
     static let showInFinder = KeyboardShortcut("r", modifiers: [.command, .option])
@@ -14,10 +15,13 @@ extension KeyboardShortcut {
     static let findNext = KeyboardShortcut("g")
     static let findPrevious = KeyboardShortcut("g", modifiers: [.command, .shift])
     static let switchView = KeyboardShortcut("/")
-    static let tableOfContents = KeyboardShortcut("t")
+    static let tableOfContents = KeyboardShortcut("t", modifiers: [.command, .option])
     static let shortcuts = KeyboardShortcut("'") // not ⌘?: macOS keeps that for Help search
     static let immersive = KeyboardShortcut("f", modifiers: [.command, .shift])
     static let reload = KeyboardShortcut("r")
+    static let sidebar = KeyboardShortcut("s", modifiers: [.control, .command]) // macOS's own for sidebars
+    static let sidebarSafari = KeyboardShortcut("l", modifiers: [.command, .shift]) // Safari's
+    static let unreadOnly = KeyboardShortcut("u", modifiers: [.command, .option]) // the unread filter beside the sidebar button
     static let nextTab = KeyboardShortcut(.tab, modifiers: .control)
     static let previousTab = KeyboardShortcut(.tab, modifiers: [.control, .shift])
     static func tab(_ n: Int) -> KeyboardShortcut { KeyboardShortcut(KeyEquivalent(Character(String(n)))) } // 1…8
@@ -75,8 +79,9 @@ struct ShortcutGroup {
 
 @MainActor enum Shortcuts {
     static let groups: [ShortcutGroup] = [
-        ShortcutGroup("Files & Tabs", [
-            Shortcut("Open a file", .open),
+        ShortcutGroup("Documents & Tabs", [
+            Shortcut("Open a document", .open),
+            Shortcut("New tab from the sidebar · back to the page", .newTab),
             Shortcut("Close Tab", .closeTab, .closeTabX),
             Shortcut("Tab 1–8 · last tab", text: "⌘1–8", KeyboardShortcut.lastTab.glyph),
             Shortcut("Next · previous tab", .nextTab, .previousTab),
@@ -94,6 +99,8 @@ struct ShortcutGroup {
             Shortcut("Bottom · top", .vimBottom, .vimTop),
         ]),
         ShortcutGroup("View", [
+            Shortcut("Show · hide sidebar", .sidebarSafari, .sidebar),
+            Shortcut("Show Only Unread", .unreadOnly),
             Shortcut("Reading ↔ Source", .switchView),
             Shortcut("Toggle Table of Contents", .tableOfContents),
             Shortcut("Immersive Mode", .immersive),
@@ -102,6 +109,7 @@ struct ShortcutGroup {
         ]),
         ShortcutGroup("Find & Text", [
             Shortcut("Find", .find, .findSlash),
+            Shortcut("Search the sidebar (list focused)", .find),
             Shortcut("Next · previous match", .findNext, .findPrevious),
             Shortcut("Bigger · smaller · default size", .bigger, .smaller, .defaultSize),
         ]),

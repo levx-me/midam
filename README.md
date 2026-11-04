@@ -54,13 +54,14 @@ python3 tools/strings-audit.py                  # en/ko strings complete
 swiftc Sources/Midam/TabOrder.swift tools/TabOrderTest/main.swift -o /tmp/taborder && /tmp/taborder
 ```
 
-The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest` and `tools/SwipeTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
+The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTest`, `tools/RenderCacheTest`, `tools/TipTest`, `tools/SwipeTest` and `tools/LibraryTest` build the same way; each file's header has the exact command. `tools/webkit-test.js` renders pages in headless WebKit through Playwright and is skipped when Playwright is not installed.
 
 ## Shortcuts
 
 | Key | Action |
 | --- | --- |
 | ⌘O | Open file |
+| ⌘T | New tab: into the sidebar's list (↩ opens the document in a new tab; ⌘T or Esc back to the page) |
 | ⌘W or x | Close tab |
 | ⌘1–9 | Go to tab (⌘9: last tab) |
 | ⌘[ / ⌘], two-finger swipe | Back / forward |
@@ -68,7 +69,8 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | ⌘F or / , ⌘G / ⇧⌘G | Find (the 🔍 button in the header) / next / previous (Esc closes) |
 | ⌘+ / ⌘− / ⌘0 | Text size larger / smaller / default |
 | ⌘/ | Toggle Reading / Source |
-| ⌘T | Toggle the table of contents (also the ☰ button in the header) |
+| ⌥⌘T | Toggle the table of contents (also the ☰ button in the header) |
+| ⇧⌘L or ⌃⌘S | Show / hide the sidebar (also the sidebar button in the header) |
 | ⇧⌘F | Immersive mode: hide the header |
 | ⌘R | Reload |
 | ⌥⌘R | Show in Finder |

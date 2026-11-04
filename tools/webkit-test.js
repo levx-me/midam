@@ -200,7 +200,66 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("diagonal wheel over a code block scrolls the page down", d.y >= 100, d);
   check("diagonal wheel over a code block scrolls it sideways", d.x >= 60, d);
 
+  // 6. The first render shows at once: before mermaid is loaded a diagram shows its code; then it is
+  // drawn in place, in the same figure, and a reader scrolled past it stays on the same line.
+  const cold = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1000, height: 800 } })).newPage();
+  await cold.setContent(read("template.html").replace("/*STYLE*/", read("katex.min.css") + "\n" + read("style.css")));
+  await cold.addScriptTag({ content: ["marked.umd.js", "highlight.min.js", "katex.min.js", "emoji.js", "markdown.js", "render.js"].map(read).join("\n;\n") });
+  await cold.evaluate(c => midamStyle({ colors: c.colors, monochrome: c.mono }), midam);
+  const pre = await cold.evaluate(async () => {
+    const md = "# Top\n\n" + "Text.\n\n".repeat(40) + "```mermaid\nflowchart TB\n  Alpha --> Beta --> Gamma --> Delta\n```\n\n" +
+      Array.from({ length: 200 }, (_, i) => "Line " + i + ".").join("\n\n");
+    const r = await midamRender(md, "", {});
+    const fig = document.querySelector("body > #content figure.diagram");
+    globalThis.fig0 = fig;
+    scrollTo(0, fig.getBoundingClientRect().bottom + scrollY + 200); // reading below the diagram
+    globalThis.line0 = [...document.querySelectorAll("body > #content p")].find(p => p.getBoundingClientRect().top > 100);
+    return { mermaid: typeof mermaid, diagrams: r.diagrams, html: r.html, outline: r.outline.map(h => h.id),
+      code: fig.checkVisibility() && fig.querySelector("pre code")?.textContent.includes("Alpha --> Beta"), svg: !!fig.querySelector("svg"),
+      top: line0.getBoundingClientRect().top };
+  });
+  check("first render: shows a diagram's code before mermaid is loaded", pre.mermaid === "undefined" && pre.code && !pre.svg, pre);
+  check("first render: outline at once, page not cached until drawn", pre.diagrams === true && pre.html === null && pre.outline[0] === "top", pre);
+  await cold.addScriptTag({ content: read("mermaid.min.js") });
+  const post = await cold.evaluate(async () => {
+    const html = await midamDrawDiagrams();
+    const fig = document.querySelector("body > #content figure.diagram");
+    return { same: fig === fig0, svg: !!fig.querySelector("svg"), html: typeof html === "string" && html.includes("<svg"), top: line0.getBoundingClientRect().top };
+  });
+  check("then mermaid draws it in place, in the same figure", post.same && post.svg, post);
+  check("drawing it keeps the line being read where it was", Math.abs(post.top - pre.top) < 1, [pre.top, post.top]);
+  check("the drawn page goes to the render cache", post.html, post);
+
+  // 7. Find typed letter by letter, then closed: a highlight name is never set() over a registered one
+  // (the system WebKit repaints nothing then, so old boxes stay on screen), only the current query's
+  // matches are registered, the current one sits on its text, and nothing is left after closing.
+  const f = await page.evaluate(async () => {
+    await midamRender("The ADL engine adds depth and decides on a deposit.\n\nEach decision updates the OrderBook dependency.", "", {});
+    const set = HighlightRegistry.prototype.set;
+    let replaced = 0;
+    HighlightRegistry.prototype.set = function (k, v) { if (this.has(k)) replaced++; return set.call(this, k, v); };
+    const steps = [];
+    for (const q of ["d", "de", "dep"]) {
+      const [index, count] = midamFind(q, 0);
+      const ranges = [...CSS.highlights.get("midam-find")], cur = [...CSS.highlights.get("midam-current")][0];
+      const a = cur.getBoundingClientRect(), t = document.createRange();
+      t.selectNodeContents(cur.startContainer.parentElement);
+      const on = [...t.getClientRects()].some(b => a.left >= b.left - 1 && a.right <= b.right + 1 && a.top < b.bottom && a.bottom > b.top && a.height > 0);
+      steps.push({ q, index, count, registered: ranges.length, all: ranges.every(r => r.toString().toLowerCase() === q), on });
+    }
+    midamFindStep(1);
+    midamFindClear();
+    HighlightRegistry.prototype.set = set;
+    return { steps, replaced, left: CSS.highlights.size, marks: document.querySelectorAll("mark").length };
+  });
+  check("find: no highlight is set over a registered one (WebKit would not repaint)", f.replaced === 0, f.replaced);
+  for (const s of f.steps) {
+    check(`find "${s.q}": only its matches are registered`, s.count > 0 && s.registered === s.count && s.all, s);
+    check(`find "${s.q}": the current match sits on its text`, s.index === 1 && s.on, s);
+  }
+  check("find closed: no highlight or mark left", f.left === 0 && f.marks === 0, f);
+
   await browser.close();
-  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel)`);
+  console.log(bad ? `FAILED ${bad} of ${n}` : `webkit: ${n} checks passed (views, app ids, hostile mermaid inert, theme, wide layout, diagonal wheel, first paint before mermaid, find highlights)`);
   process.exit(bad ? 1 : 0);
 })().catch(e => { console.log("FAILED", e); process.exit(1); });

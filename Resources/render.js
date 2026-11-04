@@ -1,11 +1,13 @@
 // Runs in the app's isolated "midam" content world, never in the page.
-// The new content is built off-screen and swapped in once its images have decoded,
-// so a re-render (auto-reload) keeps the scroll position without a flash or jump.
+// The new content is built off-screen and swapped in; a re-render (auto-reload) waits for its
+// images and diagrams first, so it keeps the scroll position without a flash or jump. The first
+// render shows at once: diagrams show their code until midamDrawDiagrams draws them in place.
 // `words` are the localised labels the page shows (alert titles, footnotes, diagram errors).
-// Returns "mermaid" (without showing anything) the first time a document has a diagram and
-// mermaid is not loaded yet: the app then evaluates mermaid.min.js in this world and calls again.
+// Returns "mermaid" (without showing anything) when a re-render has a diagram and mermaid is not
+// loaded yet: the app then evaluates mermaid.min.js in this world and calls again (asked once).
 // Otherwise it returns the table of contents, {outline: [{level, text, id}], current: id or ""},
-// and the finished 읽기 HTML for the app's render cache (html: null when over 10 MB).
+// and the finished 읽기 HTML for the app's render cache (html: null when over 10 MB, or when
+// diagrams wait for mermaid: diagrams true, the app loads it and calls midamDrawDiagrams).
 let renders = 0, askedForMermaid = false;
 
 // A trackpad gesture over a block that scrolls sideways (code, a wide table, diagram or formula)
@@ -27,28 +29,36 @@ function setBase(base) {
   b.href = base;
 }
 async function midamRender(md, base, words) {
-  const gen = ++renders;
+  const gen = ++renders, t0 = performance.now(), timing = {}; // timing: ms per step, logged by the app (OpenTiming)
+  const lap = (name, since) => { timing[name] = Math.round(performance.now() - since); return performance.now(); };
   setBase(base);
   const next = document.createElement("article");
   next.id = "content";
   next.innerHTML = midamParse(md, words);
   const seen = Object.create(null); // no prototype: "constructor" is a heading like any other
   for (const h of next.querySelectorAll("h1,h2,h3,h4,h5,h6")) if (!h.id) h.id = headingId(h.textContent, seen);
+  let t = lap("parse", t0);
+  // The views by position, never by id: the document may hold an element with id "content" or "source".
+  const shown = document.querySelector("body > #content"), first = !shown.hasChildNodes(); // nothing on screen yet
   const diagrams = [...next.querySelectorAll("pre > code.language-mermaid")];
   if (diagrams.length && typeof mermaid === "undefined" && !askedForMermaid) {
     askedForMermaid = true;
-    return "mermaid";
+    if (!first) return "mermaid";
   }
-  if (diagrams.length && typeof mermaid !== "undefined") {
-    diagramWords = words || {};
-    await Promise.all(diagrams.map(code => {
-      const fig = document.createElement("figure");
-      fig.className = "diagram";
-      diagramSource.set(fig, code.textContent);
-      code.parentElement.replaceWith(fig);
-      return drawDiagram(fig);
-    }));
-  }
+  // Each diagram a figure holding its code (style.css shows it as code), drawn here before a
+  // re-render swaps in, or after the first render shows (midamDrawDiagrams).
+  const figs = diagrams.map(code => {
+    const fig = document.createElement("figure");
+    fig.className = "diagram";
+    diagramSource.set(fig, code.textContent);
+    code.parentElement.replaceWith(fig);
+    fig.appendChild(code.parentElement);
+    return fig;
+  });
+  diagramWords = words || {};
+  const drawNow = !first && typeof mermaid !== "undefined";
+  if (drawNow) await Promise.all(figs.map(drawDiagram));
+  t = lap("diagrams", t);
   // Every table in a scroll box (style.css: wide ones scroll there, never squeezed or the page).
   for (const table of next.querySelectorAll("table")) {
     const wrap = document.createElement("div");
@@ -65,11 +75,14 @@ async function midamRender(md, base, words) {
   const source = document.createElement("pre");
   source.id = "source";
   tint(source.appendChild(document.createElement("code")), md, "markdown");
-  const images = Promise.all([...next.querySelectorAll("img")].map(i => i.decode().catch(() => {})));
-  await Promise.race([images, new Promise(r => setTimeout(r, 1000))]);
+  t = lap("highlight", t);
+  if (!first) { // a page already on screen: swap in once the images have decoded (the first render shows at once)
+    const images = Promise.all([...next.querySelectorAll("img")].map(i => i.decode().catch(() => {})));
+    await Promise.race([images, new Promise(r => setTimeout(r, 1000))]);
+  }
+  t = lap("images", t);
   if (gen !== renders) return; // a newer render (e.g. a quick second save) won
-  // The views by position, never by id: the document may hold an element with id "content" or "source".
-  const shown = document.querySelector("body > #content"), html = next.innerHTML;
+  const html = next.innerHTML;
   let root = next;
   if (cachedHTML !== null && sameRender(cachedHTML, html)) {
     // The cached page on screen is this render: keep its nodes (nothing repaints or moves), and
@@ -83,7 +96,26 @@ async function midamRender(md, base, words) {
   startSpy();
   tocHeads = outlineHeads(root);
   spySent = currentHeading(); // reported with the outline; the spy sends only changes from here
-  return { outline: midamOutline(tocHeads), current: spySent, html: html.length <= 10000000 ? html : null };
+  lap("swap", t);
+  lap("total", t0);
+  const result = { outline: midamOutline(tocHeads), current: spySent, html: html.length <= 10000000 ? html : null, timing };
+  waiting = drawNow ? [] : figs;
+  if (!figs.length || drawNow) return result;
+  if (typeof mermaid === "undefined") return { ...result, html: null, diagrams: true };
+  return { ...result, html: await midamDrawDiagrams() };
+}
+
+// The figures the last render showed as code, drawn in place once mermaid is loaded (a figure
+// above the reading line keeps the text being read where it is; drawDiagram). Returns the
+// finished 읽기 HTML for the render cache, or null if a newer render replaced the page meanwhile.
+let waiting = [];
+async function midamDrawDiagrams() {
+  const gen = renders, figs = waiting;
+  waiting = [];
+  if (typeof mermaid === "undefined" || !figs.length) return null;
+  await Promise.all(figs.map(drawDiagram));
+  const html = document.querySelector("body > #content").innerHTML;
+  return gen === renders && html.length <= 10000000 ? html : null;
 }
 
 // A cached render from the app (the last finished 읽기 page of this file, made with the same file,
@@ -262,11 +294,20 @@ async function drawDiagram(fig) {
       note.className = "diagram-error";
       const label = typeof diagramWords.diagram === "string" ? diagramWords.diagram : "Diagram could not be drawn";
       note.textContent = label + ": " + (String(e?.message || e).split("\n").find(l => l.trim()) || "").slice(0, 160);
-      fig.replaceChildren(pre, note);
+      keepPlace(fig, () => fig.replaceChildren(pre, note));
       return;
     }
   }
-  fig.innerHTML = svg; // mermaid's output, sanitised by it under securityLevel "strict"; page script is off
+  keepPlace(fig, () => { fig.innerHTML = svg; }); // mermaid's output, sanitised by it under securityLevel "strict"; page script is off
+}
+
+// Changes a figure; one on screen that starts above the reading line scrolls the page by its
+// change in height, so the text being read stays put (unless the browser's scroll anchoring did).
+function keepPlace(fig, change) {
+  const on = fig.isConnected, top = on ? fig.getBoundingClientRect().top : 0, height = on ? fig.offsetHeight : 0, y = scrollY;
+  change();
+  const grown = on ? fig.offsetHeight - height : 0; // the layout, and any anchoring, happen here
+  if (grown && top < headerInset && scrollY === y) scrollBy(0, grown);
 }
 
 // After a theme or font change, redraw the diagrams on screen in the new colours.
@@ -397,13 +438,18 @@ function midamFindStep(d) {
   return midamFindPaint(true);
 }
 
+// Clear, then set under fresh names: the system WebKit (before 319154@main, webkit.org/b/321567)
+// repaints nothing when set() replaces a registered highlight, so the last query's boxes stayed
+// painted (and later half-repainted) after the query changed or find closed. clear() repaints the
+// old ranges; a new name repaints the new ones.
 function midamFindPaint(reveal) {
+  CSS.highlights.clear();
   CSS.highlights.set("midam-find", new Highlight(...finds));
   if (current >= 0) {
     CSS.highlights.set("midam-current", new Highlight(finds[current]));
     const b = finds[current].getBoundingClientRect();
     if (reveal && (b.top < headerInset + 48 || b.bottom > innerHeight - 24)) scrollBy(0, b.top - innerHeight / 3);
-  } else CSS.highlights.delete("midam-current");
+  }
   return [current + 1, finds.length];
 }
 

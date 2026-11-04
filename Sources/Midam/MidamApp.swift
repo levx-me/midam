@@ -22,10 +22,24 @@ struct MidamApp: App {
 
 @MainActor struct MidamCommands: Commands {
     @ObservedObject private var store = Store.shared
+    @ObservedObject private var sidebar = SidebarState.shared
     private var page: Page? { store.current?.page }
+
+    /// ⌘F searches the sidebar while its list or its search field has focus (or no page is
+    /// open), else finds in the page.
+    private func find() {
+        let inSidebar = sidebar.searchFieldFocused || (NSApp.keyWindow.map(Sidebar.hasFocus) ?? false)
+        if inSidebar || page == nil {
+            store.sidebarOpen = true
+            sidebar.openSearch()
+        } else {
+            page?.show()
+        }
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("New Tab") { Sidebar.toggleFocus(store) }.keyboardShortcut(.newTab)
             Button("Open…") { store.showOpenPanel() }.keyboardShortcut(.open)
             Menu("Open Recent") {
                 ForEach(store.recents, id: \.self) { url in
@@ -34,6 +48,7 @@ struct MidamApp: App {
                 Divider()
                 Button("Clear Menu") { store.clearRecents() }.disabled(store.recents.isEmpty)
             }
+            Button("Add Project…") { AddProject.show() }
         }
         CommandGroup(replacing: .saveItem) {
             Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTab)
@@ -44,12 +59,26 @@ struct MidamApp: App {
         }
         CommandGroup(after: .textEditing) {
             Divider()
-            Button("Find…") { page?.show() }.keyboardShortcut(.find).disabled(page == nil)
+            Button("Find…") { find() }.keyboardShortcut(.find).disabled(page == nil && !store.sidebarOpen)
             Button("Find…") { page?.show() }.keyboardShortcut(.findSlash).disabled(page == nil || store.findFocused)
             Button("Find Next") { page?.step(1) }.keyboardShortcut(.findNext).disabled(page == nil)
             Button("Find Previous") { page?.step(-1) }.keyboardShortcut(.findPrevious).disabled(page == nil)
         }
         CommandGroup(before: .toolbar) {
+            // ⇧⌘L as in Safari, ⌃⌘S as macOS's sidebars.
+            if store.sidebarOpen {
+                Button("Hide Sidebar") { store.sidebarOpen = false }.keyboardShortcut(.sidebarSafari)
+                Button("Hide Sidebar") { store.sidebarOpen = false }.keyboardShortcut(.sidebar)
+            } else {
+                Button("Show Sidebar") { store.sidebarOpen = true }.keyboardShortcut(.sidebarSafari)
+                Button("Show Sidebar") { store.sidebarOpen = true }.keyboardShortcut(.sidebar)
+            }
+            Toggle("Show Only Unread", isOn: Binding(get: { sidebar.unreadOnly }, set: { on in
+                store.sidebarOpen = true
+                sidebar.setUnreadOnly(on)
+            }))
+            .keyboardShortcut(.unreadOnly)
+            Divider()
             Picker("View", selection: Binding(get: { page?.source ?? false }, set: { page?.setView(source: $0) })) {
                 Text("Reading").tag(false)
                 Text("Source").tag(true)
@@ -234,8 +263,4 @@ extension NSColor {
     static let muted = ink(light: 0x67645e, dark: 0xa09c94)
     /// The faintest grey that still meets 4.5:1 on paper (4.6 light, 4.59 dark).
     static let faint = ink(light: 0x75726b, dark: 0x888480)
-    /// The app accent in place of system blue: ink in light; in dark the faint warm grey, since a
-    /// white knob or checkmark on off-white ink would vanish (3.7:1 with white, 4.6:1 on paper).
-    /// Must match Assets.xcassets/AccentColor and --accent in style.css.
-    static let accent = ink(light: 0x2b2a27, dark: 0x888480)
 }

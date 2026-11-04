@@ -36,23 +36,3 @@ struct Heading: Identifiable, Equatable {
         return id
     }
 }
-
-/// The panel's one-time hint on a tab's first showing: transient, never the user's toggle
-/// (Store.tocOpen). Times are seconds since the hint began.
-enum TocIntro {
-    static let hold = 1.8, afterLeave = 0.6, cap = 6.0
-
-    /// The panel shows while the user has it open or the hint runs, if there is an outline.
-    static func shown(available: Bool, open: Bool, intro: Bool) -> Bool { available && (open || intro) }
-
-    /// Whether a tab's first showing starts the hint: once per tab, and not while open anyway.
-    static func starts(introduced: Bool, available: Bool, open: Bool) -> Bool { available && !introduced && !open }
-
-    /// When the hint ends: after `hold`; with the pointer on the panel, `afterLeave` after it
-    /// leaves (but not before `hold`); never after `cap`, so a lost exit event cannot keep it.
-    static func end(hovered: Bool, leftAt: Double?) -> Double {
-        if hovered { return cap }
-        guard let leftAt else { return hold }
-        return min(cap, max(hold, leftAt + afterLeave))
-    }
-}

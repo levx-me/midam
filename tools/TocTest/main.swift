@@ -22,15 +22,4 @@ assert(Heading.anchor("top", in: toc.outline) == "top")
 let many = NSArray(array: (0..<600).map { item(2, "h\($0)", "h\($0)") })
 assert(Heading.outline(many)?.count == 500)
 // The first-showing hint.
-assert(TocIntro.end(hovered: false, leftAt: nil) == 1.8)                    // it ends by itself
-assert(TocIntro.end(hovered: false, leftAt: 3) == 3.6)                      // hovered, then left: 0.6 s later
-assert(TocIntro.end(hovered: false, leftAt: 0.5) == 1.8)                    // left early: not before 1.8 s
-assert(TocIntro.end(hovered: true, leftAt: nil) == 6 && TocIntro.end(hovered: false, leftAt: 9) == 6) // stuck hover: the cap
-assert(TocIntro.shown(available: true, open: false, intro: true))
-assert(!TocIntro.shown(available: true, open: false, intro: false))         // toggled during the hint: the toggle decides
-assert(TocIntro.shown(available: true, open: true, intro: false))
-assert(!TocIntro.shown(available: false, open: true, intro: true))
-assert(!TocIntro.starts(introduced: false, available: true, open: true))    // already open: no hint
-assert(!TocIntro.starts(introduced: true, available: true, open: false))    // once per tab
-assert(TocIntro.starts(introduced: false, available: true, open: false))
 print("toc rules: checks passed")

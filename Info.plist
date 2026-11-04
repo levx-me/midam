@@ -15,7 +15,14 @@
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>NSAccentColorName</key><string>AccentColor</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key><string>app.midam.project-drag</string>
+			<key>UTTypeDescription</key><string>Midam project (sidebar drag)</string>
+			<key>UTTypeConformsTo</key><array><string>public.data</string></array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

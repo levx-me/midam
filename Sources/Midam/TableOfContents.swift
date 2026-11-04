@@ -1,24 +1,18 @@
 import SwiftUI
 
 /// The table of contents: a glass panel at the right, over the page (which never reflows for it).
-/// The header's toggle and View > Show Table of Contents (⌘T) open and close it, for every tab,
-/// remembered across launches (Store.tocOpen). While it is closed it shows itself once when a
-/// tab's document is first shown, as a hint. Hidden for a document without headings and in 원문.
+/// The header's toggle and View > Show Table of Contents (⌥⌘T) open and close it, for every tab,
+/// remembered across launches (Store.tocOpen). Hidden for a document without headings and in 원문.
 struct TableOfContents: View {
     @ObservedObject var store: Store
     let page: Page
     /// Where the panel starts: below the header, and below the find field while it shows.
     let top: CGFloat
-    @State private var intro = false
-    @State private var introStart = ContinuousClock.now
-    @State private var onPanel = false
-    @State private var leftAt: Double?
-    @State private var hide: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let width: CGFloat = 260
     private var available: Bool { page.tocAvailable }
-    private var shown: Bool { TocIntro.shown(available: available, open: store.tocOpen, intro: intro) }
+    private var shown: Bool { available && store.tocOpen }
 
     var body: some View {
         panelArea
@@ -27,8 +21,6 @@ struct TableOfContents: View {
             .padding(.bottom, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth, value: shown)
-            .onChange(of: Intro(page: ObjectIdentifier(page), ready: available), initial: true) { introduce() }
-            .onChange(of: store.tocOpen) { endIntro() } // the user's toggle takes over
     }
 
     /// Liquid Glass materializes on macOS 26; before that the material slides in a little and fades.
@@ -54,16 +46,7 @@ struct TableOfContents: View {
             }
         }
         .glassPanel()
-        .onHover { inside in
-            onPanel = inside
-            if !inside { leftAt = elapsed }
-            if intro { scheduleHide() }
-        }
-        .onExitCommand { // Esc with focus in the panel
-            endIntro()
-            store.tocOpen = false
-        }
-        .onDisappear { onPanel = false }
+        .onExitCommand { store.tocOpen = false } // Esc with focus in the panel
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Table of Contents")
     }
@@ -80,44 +63,6 @@ struct TableOfContents: View {
         .frame(width: Self.width, alignment: .leading)
     }
 
-    /// The one-time hint on a tab's first showing; not needed while the panel is open anyway.
-    private func introduce() {
-        guard available, !page.tocIntroduced else { return }
-        let starts = TocIntro.starts(introduced: page.tocIntroduced, available: available, open: store.tocOpen)
-        page.tocIntroduced = true
-        guard starts else { return }
-        intro = true
-        introStart = .now
-        leftAt = nil
-        scheduleHide()
-    }
-
-    private var elapsed: Double {
-        let d = ContinuousClock.now - introStart
-        return Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
-    }
-
-    /// Ends the hint at TocIntro.end, rescheduled on every hover change. The deadline is always
-    /// set (the cap while hovered), so a missing exit event cannot keep the panel up.
-    private func scheduleHide() {
-        hide?.cancel()
-        let end = introStart + .seconds(TocIntro.end(hovered: onPanel, leftAt: leftAt))
-        hide = Task {
-            try? await Task.sleep(until: end, clock: .continuous)
-            guard !Task.isCancelled else { return }
-            intro = false
-        }
-    }
-
-    private func endIntro() {
-        hide?.cancel()
-        intro = false
-    }
-
-    private struct Intro: Equatable {
-        let page: ObjectIdentifier
-        let ready: Bool
-    }
 }
 
 /// One heading: plain text, indented by level; the section being read in ink, the others faint
@@ -150,7 +95,7 @@ private struct TocRow: View {
 }
 
 /// ☰ at the start of the header's right capsule: opens and closes the table of contents (the same
-/// state as ⌘T). Ink while open; disabled without headings and in 원문.
+/// state as ⌥⌘T). Ink while open; disabled without headings and in 원문.
 struct TocToggle: View {
     @ObservedObject var store: Store
     let page: Page

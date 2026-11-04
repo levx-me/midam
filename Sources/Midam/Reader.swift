@@ -11,14 +11,17 @@ import UniformTypeIdentifiers
     let id = UUID()
     let url: URL
     let text: String
+    /// The file's mtime and size as `text` was read (RenderCache.read); nil if it changed meanwhile.
+    let stamp: FileStamp?
     let page = Page()
     /// Selected at least once. A tab gets its web view only then, so a restored session renders
     /// just the selected tab at launch and each other one when first shown.
     var shown = false
 
-    init(url: URL, text: String) {
+    init(url: URL, text: String, stamp: FileStamp? = nil) {
         self.url = url
         self.text = text
+        self.stamp = stamp
     }
 }
 
@@ -58,7 +61,7 @@ import UniformTypeIdentifiers
     var overlayTop: CGFloat { immersive ? rowTop : rowTop + TitleStrip.capsule + 8 }
     /// Back and forward through the places read (⌘[ ⌘]), in memory only.
     @Published private(set) var history = NavHistory<Spot>()
-    /// View > Show Table of Contents (⌘T): the panel stays open, for every tab, until turned off.
+    /// View > Show Table of Contents (⌥⌘T): the panel stays open, for every tab, until turned off.
     @Published var tocOpen = UserDefaults.standard.bool(forKey: Store.tocKey) {
         didSet { UserDefaults.standard.set(tocOpen, forKey: Self.tocKey) }
     }
@@ -68,6 +71,11 @@ import UniformTypeIdentifiers
         didSet { UserDefaults.standard.set(immersive, forKey: Self.immersiveKey) }
     }
     private static let immersiveKey = "immersive"
+    /// View > Show Sidebar (⌃⌘S): the documents list at the left, on until turned off, remembered.
+    @Published var sidebarOpen = UserDefaults.standard.object(forKey: Store.sidebarKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sidebarOpen, forKey: Self.sidebarKey) }
+    }
+    private static let sidebarKey = "sidebarOpen"
     private var keyMonitor: Any?
     /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, / (find), x (close tab).
     private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .lineDown, .lineUp, .vimTop, .vimBottom,
@@ -122,10 +130,11 @@ import UniformTypeIdentifiers
 
     private func load(_ url: URL) -> OpenFile? {
         do {
-            let data = try Data(contentsOf: url)
+            // With its stamp, so the tab's web view need not read it again; Data for the error.
+            let read = try RenderCache.read(url) ?? (String(decoding: try Data(contentsOf: url), as: UTF8.self), nil)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             recents = NSDocumentController.shared.recentDocumentURLs
-            return OpenFile(url: url, text: String(decoding: data, as: UTF8.self))
+            return OpenFile(url: url, text: read.text, stamp: read.stamp)
         } catch {
             NSApp.presentError(error)
             return nil
@@ -160,10 +169,9 @@ import UniformTypeIdentifiers
         if !files.isEmpty { showWindow() }
     }
 
-    /// The Dock icon was clicked: show the window, or the open panel if nothing is open.
-    func reopen() {
-        if files.isEmpty { showOpenPanel() } else { showWindow() }
-    }
+    /// The Dock icon was clicked, or the app launched with nothing to open: show the window,
+    /// with its sidebar, even with no tab.
+    func reopen() { showWindow() }
 
     // MARK: Tabs
 
@@ -172,10 +180,12 @@ import UniformTypeIdentifiers
     func select(_ file: OpenFile, record: Bool = true) {
         if record, file.id != selected, let here = here() { history.leave(here) }
         file.shown = true
+        Welcome.launchEmpty = false
         selected = file.id
         window?.title = file.url.lastPathComponent // Mission Control and the Window menu
         window?.representedURL = file.url
         save()
+        LibraryModel.shared.opened(file.url) // shown is read (D5)
     }
 
     /// Selects tab `n` (1-based), or the last tab for nil.
@@ -189,14 +199,16 @@ import UniformTypeIdentifiers
         select(files[(i + d + files.count) % files.count])
     }
 
-    /// Closes a tab; its web view and file watcher go with it. The last tab closes the window.
+    /// Closes a tab; its web view and file watcher go with it. The last one leaves the window
+    /// open, with the sidebar, as Mail does (D11).
     func close(_ file: OpenFile) {
         guard let i = files.firstIndex(where: { $0.id == file.id }) else { return }
         files.remove(at: i)
         if files.isEmpty {
             selected = nil
+            window?.title = "Midam"
+            window?.representedURL = nil
             save()
-            window?.close()
         } else if selected == file.id {
             select(files[min(i, files.count - 1)], record: false)
         } else {
@@ -246,10 +258,11 @@ import UniformTypeIdentifiers
         showWindow()
     }
 
-    /// ⌘W: the current tab in the reader window; any other window (Settings) just closes.
+    /// ⌘W: the current tab in the reader window, or the window once it has none; any other
+    /// window (Settings) just closes.
     func closeCurrent() {
         if let key = NSApp.keyWindow, key !== window { return key.performClose(nil) }
-        if let current { close(current) }
+        if let current { close(current) } else { window?.performClose(nil) }
     }
 
     private func save() {
@@ -270,7 +283,7 @@ import UniformTypeIdentifiers
 
     func setWindowGround(_ color: NSColor) { window?.backgroundColor = color }
 
-    private func showWindow() {
+    func showWindow() {
         let w = window ?? makeWindow()
         if w.isMiniaturized { w.deminiaturize(nil) }
         w.makeKeyAndOrderFront(nil)
@@ -299,7 +312,7 @@ import UniformTypeIdentifiers
         observers = [NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.measureLights() }
         }]
-        if let current { w.title = current.url.lastPathComponent; w.representedURL = current.url }
+        if let current { w.title = current.url.lastPathComponent; w.representedURL = current.url } else { w.title = "Midam" }
         place(w)
         window = w
         measureLights()
@@ -316,10 +329,16 @@ import UniformTypeIdentifiers
     /// field focused; otherwise the key goes straight to its window, which bypasses the menu.
     /// Returns whether it did that.
     private func singleKeyBypass(_ event: NSEvent) -> Bool {
+        // Esc in the sidebar's list: closes its search first, then back to the page.
+        if event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+           let w = NSApp.keyWindow, w === window, Sidebar.hasFocus(w) {
+            if SidebarState.shared.searching { SidebarState.shared.closeSearch() } else { Sidebar.focusPage(w) }
+            return true
+        }
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
         guard mods.isSubset(of: .shift), let c = event.charactersIgnoringModifiers?.lowercased(), Self.singleKeys.contains(c) else { return false }
         let key = NSApp.keyWindow
-        if let key, key === window, !(key.firstResponder is NSText) { return false } // the page: the menu's
+        if let key, key === window, !(key.firstResponder is NSText), !Sidebar.hasFocus(key) { return false } // the page: the menu's
         guard let target = key ?? event.window else { return false }
         target.sendEvent(event)
         return true
@@ -368,10 +387,10 @@ import UniformTypeIdentifiers
         if leading != rowLeading { rowLeading = leading }
     }
 
-    /// ⌘W reaching the window itself (the standard Close item) closes one tab, not all of them;
-    /// the red button closes the window.
+    /// ⌘W reaching the window itself (the standard Close item) closes one tab, not all of them,
+    /// and the window once it has none; the red button closes the window.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard NSApp.currentEvent?.type == .keyDown, files.count > 1 else { return true }
+        guard NSApp.currentEvent?.type == .keyDown, !files.isEmpty else { return true }
         closeCurrent()
         return false
     }
@@ -406,11 +425,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Store.shared.restore()
+        // With a cached list from the last run the sidebar is filled at once: no welcome then.
+        Welcome.launchEmpty = Store.shared.files.isEmpty && !FileManager.default.fileExists(atPath: LibraryCache.standardURL.path)
         // Settings' font lists, built once off the main thread so the Fonts tab opens at once.
         DispatchQueue.global(qos: .utility).async { _ = Fonts.all; _ = BundledFonts.regular }
-        // Files given at launch arrive before this; with nothing at all to show, offer the panel.
-        DispatchQueue.main.async { MainActor.assumeIsolated { if Store.shared.files.isEmpty { Store.shared.showOpenPanel() } } }
+        // Files given at launch arrive before this; with nothing to show, the window opens anyway:
+        // its sidebar is where to start.
+        DispatchQueue.main.async { MainActor.assumeIsolated { if Store.shared.files.isEmpty { Store.shared.reopen() } } }
+        LibraryModel.shared.rescan()
+        // The first tab's web view, made ahead once launch has settled (a restored tab warms it too).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { MainActor.assumeIsolated { MarkdownView.warmSpare() } }
     }
+
+    /// No live watching in the demo (D13): the list is brought up to date on a return to the app,
+    /// unless a scan is running or finished under a minute ago.
+    func applicationDidBecomeActive(_ notification: Notification) { LibraryModel.shared.refresh() }
 
     func application(_ application: NSApplication, open urls: [URL]) { Store.shared.open(urls) }
 
@@ -441,11 +470,10 @@ struct ReaderView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var theme: ColorTheme { ColorTheme.named(scheme == .dark ? darkTheme : lightTheme, dark: scheme == .dark) }
     /// The active colour theme's page background: shown before the page has styled itself,
     /// so a dark theme never flashes Midam's paper first.
-    private var ground: NSColor {
-        ColorTheme.named(scheme == .dark ? darkTheme : lightTheme, dark: scheme == .dark).color("bg")
-    }
+    private var ground: NSColor { theme.color("bg") }
 
     var body: some View {
         let reading = Reading(font: font, mono: codeFont, size: size,
@@ -453,9 +481,36 @@ struct ReaderView: View {
                               paragraph: Spacing.paragraph.value(paragraph), measure: Spacing.measure.value(measure),
                               header: store.header)
         let page = store.current?.page
+        // The sidebar at the left, under the traffic lights; the header, contents and find float
+        // over the page beside it.
+        HStack(spacing: 0) {
+            if store.sidebarOpen {
+                SidebarColumn(store: store)
+                    .transition(.move(edge: .leading))
+                    .zIndex(1) // its resize strip reaches over the page's edge
+            }
+            content(reading: reading, page: page)
+        }
+        .animation(reduceMotion ? nil : .smooth, value: store.sidebarOpen)
+        .overlay { TipLayer() }
+        .coordinateSpace(.named(Tips.space))
+        // The page runs to the top of the window and scrolls under the floating capsules;
+        // render.js pads its first line below them.
+        .ignoresSafeArea(.container, edges: .top)
+        .background(Color(nsColor: ground).ignoresSafeArea())
+        .onChange(of: ground, initial: true) { store.setWindowGround(ground) }
+        .onExitCommand { if let page, page.visible { page.close() } } // Esc with focus in the page
+        .tint(Color.accentColor)
+    }
+
+    private func content(reading: Reading, page: Page?) -> some View {
         ZStack {
             ForEach(store.files.filter(\.shown)) { f in
-                MarkdownView(text: f.text, fileURL: f.url, reading: reading, page: f.page, active: f.id == store.selected)
+                MarkdownView(text: f.text, stamp: f.stamp, fileURL: f.url, reading: reading, page: f.page, active: f.id == store.selected)
+            }
+            if store.files.isEmpty {
+                NoDocument(store: store, text: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted")))
+                    .padding(.top, store.header)
             }
         }
         .frame(minWidth: 420, minHeight: 320)
@@ -484,15 +539,6 @@ struct ReaderView: View {
         }
         .animation(reduceMotion ? nil : .smooth, value: store.immersive) // the header's fade, the panel moving up
         .animation(reduceMotion ? nil : .smooth, value: page?.visible) // the search capsule growing or showing
-        .overlay { TipLayer() }
-        .coordinateSpace(.named(Tips.space))
-        // The page runs to the top of the window and scrolls under the floating capsules;
-        // render.js pads its first line below them.
-        .ignoresSafeArea(.container, edges: .top)
-        .background(Color(nsColor: ground).ignoresSafeArea())
-        .onChange(of: ground, initial: true) { store.setWindowGround(ground) }
-        .onExitCommand { if let page, page.visible { page.close() } } // Esc with focus in the page
-        .tint(Color(nsColor: .accent))
     }
 }
 
@@ -504,7 +550,7 @@ final class ReaderHost: NSHostingView<ReaderView> {
 }
 
 /// The header: a row of floating glass over the page, on the traffic lights' line in a window:
-/// ‹ › (back, forward), the tabs' capsule with a round + (Open…) hugging it, and at the right the
+/// the sidebar button (as Safari's) while the sidebar is hidden, ‹ › (back, forward), the tabs' capsule with a round + (Open…) hugging it, and at the right the
 /// view toggle and 'Aa'. Empty space in the header drags the window.
 struct TitleStrip: View {
     @ObservedObject var store: Store
@@ -517,6 +563,12 @@ struct TitleStrip: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if !store.sidebarOpen { // open: the toggle lives in the sidebar's top strip (SidebarButtons)
+                SidebarToggle(store: store)
+                    .frame(width: Self.capsule, height: Self.capsule) // alone: a circle
+                    .glassCapsule()
+                    .fixedSize()
+            }
             HStack(spacing: 0) {
                 StripIcon(label: "Back", keys: [.back], enabled: store.history.canGoBack, action: { store.goBack() }) {
                     Image(systemName: "chevron.left")
@@ -529,8 +581,10 @@ struct TitleStrip: View {
             .frame(height: Self.capsule)
             .glassCapsule()
             .fixedSize()
-            TabStrip(store: store)
-                .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
+            if !store.files.isEmpty {
+                TabStrip(store: store)
+                    .layoutPriority(1) // offered all the room before the spacer, so it scrolls only when it must
+            }
             // Its own glass circle after the last tab: when the tabs overflow it stays at the
             // capsule's end and only they scroll.
             StripIcon(label: "Open…", keys: [.open], action: { store.showOpenPanel() }) {
@@ -565,14 +619,14 @@ struct TitleStrip: View {
         .allowsHitTesting(!store.immersive)
         .accessibilityHidden(store.immersive)
         .frame(height: Self.capsule)
-        .padding(.leading, store.rowLeading)
+        .padding(.leading, store.sidebarOpen ? 10 : store.rowLeading) // the lights sit over the sidebar
         .padding(.trailing, 10)
         .padding(.top, store.rowTop)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)
         .background { WindowDragArea() }
         .allowsHitTesting(!(store.immersive && store.fullScreen)) // nothing to drag there: the page's
-        .tint(Color(nsColor: .accent))
+        .tint(Color.accentColor)
     }
 }
 

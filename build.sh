@@ -25,10 +25,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
 cp "$(swift build -c release $SWIFTFLAGS --show-bin-path)/Midam" "$APP/Contents/MacOS/Midam"
 cp -R Resources/ "$APP/Contents/Resources/"
-# The ink accent (Assets.xcassets/AccentColor, named by NSAccentColorName in Info.plist).
-xcrun actool Assets.xcassets --compile "$APP/Contents/Resources" --platform macosx \
-  --minimum-deployment-target 14.0 --output-partial-info-plist "$OUT/assets-partial.plist" >/dev/null
-codesign --force -s - "$APP"
+# A local "Midam Dev" identity, when this Mac has one, keeps the signature the same across builds,
+# so macOS keeps its file-access answers; otherwise ad hoc (each build asks again).
+IDENTITY=-
+security find-identity -p codesigning 2>/dev/null | grep -q '"Midam Dev"' && IDENTITY="Midam Dev"
+codesign --force -s "$IDENTITY" "$APP"
 echo "Built $APP"
 [ "$INSTALL" = 1 ] || exit 0
 # Replace rather than merge, so files dropped from the bundle don't linger and break the seal.

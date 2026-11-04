@@ -677,12 +677,11 @@ struct FormatPopover: View {
             Divider()
             Button("More Settings…") { shown = false; SettingsRoute.open() }
                 .buttonStyle(.link)
-                .tint(Color(nsColor: .ink)) // the dark grey accent reads as a disabled link
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(16)
         .frame(width: 340)
-        .tint(Color(nsColor: .accent))
+        .tint(Color.accentColor)
     }
 }
 
@@ -705,7 +704,7 @@ struct SettingsView: View {
                 .tag(Tab.fonts.rawValue)
         }
         .frame(width: 480)
-        .tint(Color(nsColor: .accent))
+        .tint(Color.accentColor)
         .background(FullScreenAuxiliary())
     }
 }
@@ -783,6 +782,31 @@ struct LanguageSection: View {
                 }
                 // In the newly chosen language where there is one.
                 .environment(\.locale, language == .system ? .current : Locale(identifier: language.rawValue))
+            }
+        }
+    }
+}
+
+/// Projects hidden from the sidebar (its ⋯ menu), each with a way back.
+struct HiddenProjectsSection: View {
+    @ObservedObject private var library = LibraryModel.shared
+
+    var body: some View {
+        Section("Hidden Projects") {
+            if library.hidden.isEmpty {
+                Text("Projects you hide from the sidebar appear here.").foregroundStyle(Color(nsColor: .muted))
+            } else {
+                ForEach(library.hidden.sorted(), id: \.self) { id in
+                    let name = (id as NSString).lastPathComponent
+                    LabeledContent {
+                        Button("Show in Sidebar") { library.unhide(id) }
+                            .actionButton()
+                            .accessibilityLabel(Text(verbatim: String(format: String(localized: "Show %@ in Sidebar"), name)))
+                    } label: {
+                        Text(verbatim: name)
+                        Text(verbatim: (id as NSString).abbreviatingWithTildeInPath)
+                    }
+                }
             }
         }
     }
@@ -886,6 +910,7 @@ struct GeneralSettings: View {
                 PresetPicker(spacing: .measure, index: $measure).pickerStyle(.segmented)
             }
             LanguageSection()
+            HiddenProjectsSection()
             CacheSection()
             ResetRow()
         }
@@ -1011,7 +1036,6 @@ struct FontSettings: View {
                     }
                 }
                 .buttonStyle(.link)
-                .tint(Color(nsColor: .ink)) // the dark grey accent reads as a disabled link
             }
         }
     }

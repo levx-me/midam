@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import WebKit
+import os
 
 @MainActor private let world = WKContentWorld.world(name: "midam")
 
@@ -8,6 +9,8 @@ import WebKit
 /// marked, highlight.js, KaTeX, mermaid and every call run only in an app-owned content world.
 struct MarkdownView: NSViewRepresentable {
     let text: String
+    /// The file's mtime and size as `text` was read (nil: not read from it, or changed while read).
+    let stamp: FileStamp?
     let fileURL: URL?
     let reading: Reading
     let page: Page
@@ -61,22 +64,22 @@ struct MarkdownView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = false
-        config.userContentController.addUserScript(Self.renderer)
-        config.setURLSchemeHandler(FontSchemeHandler(), forURLScheme: FontSchemeHandler.scheme) // bundled fonts only
-        // The section being read, from render.js; reachable from the app's world only, never the page.
-        config.userContentController.add(TocSpy(page: page), contentWorld: world, name: TocSpy.name)
-        let webView = PageWebView(frame: .zero, configuration: config)
+        let c = context.coordinator
+        c.name = fileURL?.lastPathComponent ?? ""
+        c.span = OpenTiming.signposter.beginInterval("open", id: OpenTiming.signposter.makeSignpostID())
+        OpenTiming.log.log("\(c.name, privacy: .private): make web view, \(OpenTiming.sinceEvent(), format: .fixed(precision: 1), privacy: .public) ms after the event")
+        let spare = Spare.take()
+        let (webView, spy) = spare.map { ($0.webView, $0.spy) } ?? Self.newWebView()
+        OpenTiming.log.log("\(c.name, privacy: .private): \(spare == nil ? "new" : spare!.loaded ? "spare, loaded" : "spare, loading", privacy: .public) web view")
+        spy.page = page
         webView.page = page
         webView.isHidden = !active
-        webView.setValue(false, forKey: "drawsBackground") // let the SwiftUI paper colour show: no white flash
-        let c = context.coordinator
         webView.navigationDelegate = c
         c.webView = webView
         c.page = page
         c.input = text
-        c.text = text // read again, with its stamp, once the page has loaded
+        c.text = text // read again once the page has loaded, if the file changed since
+        c.stamp = stamp
         c.fileURL = fileURL
         c.reading = reading
         c.theme = theme
@@ -85,15 +88,37 @@ struct MarkdownView: NSViewRepresentable {
         page.fileURL = fileURL
         page.reload = { [weak c] in c?.reload(force: true) }
         c.watch()
-        // Read access to "/" so images anywhere (e.g. ../img.png) load; the page runs no script.
-        webView.loadFileURL(Self.page, allowingReadAccessTo: URL(fileURLWithPath: "/"))
+        // Rendered once SwiftUI has put it in the window (a detached web view is throttled); a spare
+        // still loading sends its didFinish to the coordinator.
+        if spare?.loaded == true { DispatchQueue.main.async { [weak c] in MainActor.assumeIsolated { c?.didLoad() } } }
+        OpenTiming.log.log("\(c.name, privacy: .private): web view made +\(OpenTiming.ms(since: c.born), format: .fixed(precision: 1), privacy: .public) ms")
         return webView
     }
+
+    /// A web view loading the template, with the renderer scripts and the outline handler in the
+    /// app's world; the handler's page is set when a tab takes it.
+    fileprivate static func newWebView() -> (PageWebView, TocSpy) {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.userContentController.addUserScript(renderer)
+        config.setURLSchemeHandler(FontSchemeHandler(), forURLScheme: FontSchemeHandler.scheme) // bundled fonts only
+        // The section being read, from render.js; reachable from the app's world only, never the page.
+        let spy = TocSpy(page: nil)
+        config.userContentController.add(spy, contentWorld: world, name: TocSpy.name)
+        let webView = PageWebView(frame: .zero, configuration: config)
+        webView.setValue(false, forKey: "drawsBackground") // let the SwiftUI paper colour show: no white flash
+        // Read access to "/" so images anywhere (e.g. ../img.png) load; the page runs no script.
+        webView.loadFileURL(page, allowingReadAccessTo: URL(fileURLWithPath: "/"))
+        return (webView, spy)
+    }
+
+    /// Makes the next tab's web view ahead, if there is none (Spare).
+    static func warmSpare() { Spare.warm() }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         if webView.isHidden == active {
             webView.isHidden = !active
-            if active { DispatchQueue.main.async { webView.window?.makeFirstResponder(webView) } }
+            if active { DispatchQueue.main.async { Sidebar.pageTakesFocus(webView) } }
         }
         let c = context.coordinator
         let theme = theme
@@ -125,10 +150,15 @@ struct MarkdownView: NSViewRepresentable {
         var reading: Reading?
         var theme: ColorTheme?
         private var loaded = false
+        private var readingCache = false
         private var stopped = false
         private var source: DispatchSourceFileSystemObject?
         private var pendingReload: DispatchWorkItem?
         private var pendingSave: DispatchWorkItem?
+        /// Open timing (OpenTiming): when this tab's web view was asked for, its file name, its signpost.
+        let born = ContinuousClock.now
+        var name = ""
+        var span: OSSignpostIntervalState?
 
         /// Fragments for documents opened from a link, applied on their first render.
         static var pendingFragments: [URL: String] = [:]
@@ -136,32 +166,78 @@ struct MarkdownView: NSViewRepresentable {
         static var pendingOffsets: [URL: Double] = [:]
 
         func render(fragment pending: String? = nil, offset pendingOffset: Double? = nil) {
-            guard loaded, let webView else { return }
+            guard loaded, !readingCache, let webView else { return }
             let fragment = pending ?? fileURL.flatMap { Self.pendingFragments.removeValue(forKey: $0.standardizedFileURL) }
             let offset = pendingOffset ?? fileURL.flatMap { Self.pendingOffsets.removeValue(forKey: $0.standardizedFileURL) }
             let cacheKey = cacheKey() // the file as this render reads it
+            let started = ContinuousClock.now
             // Markdown is passed as an argument, never spliced into JS source.
             webView.callAsyncJavaScript("return await midamRender(md, base, words)",
                                        arguments: ["md": text, "base": fileURL?.deletingLastPathComponent().absoluteString ?? "",
                                                    "words": MarkdownView.words],
-                                       in: nil, in: world) { [weak self, weak webView] result in
+                                       in: nil, in: world) { [weak self] result in
                 if case .failure(let error) = result { NSLog("Midam render failed: \(error)") }
-                // The document has a diagram: mermaid (large) is evaluated in the app's world only
-                // now, once per web view, and the render runs again (render.js asks only once).
-                if case .success(let value) = result, value as? String == "mermaid", let webView {
-                    webView.evaluateJavaScript(MarkdownView.mermaid, in: nil, in: world) { [weak self] loaded in
-                        if case .failure(let error) = loaded { NSLog("Midam mermaid failed to load: \(error)") }
-                        self?.render(fragment: fragment, offset: offset)
-                    }
+                // A re-render with a diagram: the page on screen stays until mermaid is loaded, then
+                // the render runs again (render.js asks only once).
+                if case .success(let value) = result, value as? String == "mermaid" {
+                    self?.loadMermaid { self?.render(fragment: fragment, offset: offset) }
                     return
+                }
+                if let self {
+                    let t = ((try? result.get()) as? [String: Any])?["timing"] as? [String: Any] ?? [:]
+                    OpenTiming.log.log("\(self.name, privacy: .private): render in \(OpenTiming.ms(since: started), format: .fixed(precision: 1), privacy: .public) ms (page: \(t.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "), privacy: .public)), +\(OpenTiming.ms(since: self.born), format: .fixed(precision: 1), privacy: .public) ms")
+                    if let span = self.span {
+                        OpenTiming.signposter.endInterval("open", span)
+                        self.span = nil
+                        // The next tab's web view, made now the page shows, off this open's path.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { MarkdownView.warmSpare() }
+                    }
                 }
                 if case .success(let value) = result {
                     self?.page?.takeOutline(value)
-                    if let cacheKey, let html = (value as? [String: Any])?["html"] as? String { self?.saveCache(cacheKey, html) }
+                    let r = value as? [String: Any]
+                    if let cacheKey, let html = r?["html"] as? String { self?.saveCache(cacheKey, html) }
+                    if r?["diagrams"] as? Bool == true { self?.drawDiagrams(cacheKey) }
                 }
                 if let fragment { self?.scroll(to: fragment) }
                 if let offset { self?.page?.scroll(toOffset: offset) }
                 self?.page?.refresh()
+            }
+        }
+
+        /// Mermaid (large) is evaluated in the app's world only when a document has a diagram, once
+        /// per web view; `then` runs once it is (or failed to load). A call while it loads waits for it.
+        private var mermaid: [() -> Void]? // nil: not asked; the callers waiting while it loads
+        private var mermaidLoaded = false
+
+        private func loadMermaid(then: @escaping () -> Void) {
+            if mermaidLoaded { return then() }
+            if mermaid != nil { mermaid?.append(then); return }
+            guard let webView else { return }
+            mermaid = [then]
+            let asked = ContinuousClock.now
+            webView.evaluateJavaScript(MarkdownView.mermaid, in: nil, in: world) { [weak self] loaded in
+                if case .failure(let error) = loaded { NSLog("Midam mermaid failed to load: \(error)") }
+                guard let self else { return }
+                OpenTiming.log.log("\(self.name, privacy: .private): mermaid evaluated in \(OpenTiming.ms(since: asked), format: .fixed(precision: 1), privacy: .public) ms")
+                self.mermaidLoaded = true
+                let waiting = self.mermaid ?? []
+                self.mermaid = nil
+                for f in waiting { f() }
+            }
+        }
+
+        /// A first render shown with its diagrams as code: draws them in place once mermaid is
+        /// loaded, and caches the finished page (render.js returns it only if no render overtook it).
+        private func drawDiagrams(_ cacheKey: RenderKey?) {
+            loadMermaid { [weak self] in
+                let started = ContinuousClock.now
+                self?.webView?.callAsyncJavaScript("return await midamDrawDiagrams()", arguments: [:], in: nil, in: world) { result in
+                    if case .failure(let error) = result { NSLog("Midam diagrams failed: \(error)") }
+                    guard let self else { return }
+                    OpenTiming.log.log("\(self.name, privacy: .private): diagrams drawn in place in \(OpenTiming.ms(since: started), format: .fixed(precision: 1), privacy: .public) ms, +\(OpenTiming.ms(since: self.born), format: .fixed(precision: 1), privacy: .public) ms")
+                    if let cacheKey, case .success(let value) = result, let html = value as? String { self.saveCache(cacheKey, html) }
+                }
             }
         }
 
@@ -181,8 +257,23 @@ struct MarkdownView: NSViewRepresentable {
 
         /// The last finished render of this file, if it was made from the same file, settings and
         /// build: shown at once, ahead of the real render (queued after it in the same world).
-        private func showCached() {
-            guard let webView, let key = cacheKey(), let html = RenderCache.load(key) else { return }
+        /// The cache is read and decoded off the main thread; renders wait for it (`readingCache`),
+        /// so the cached page never lands over a newer one.
+        private func showCachedThenRender() {
+            let started = ContinuousClock.now, key = cacheKey()
+            readingCache = true
+            Task { [weak self] in
+                let html = await Task.detached(priority: .userInitiated) { key.flatMap { RenderCache.load($0) } }.value
+                guard let self else { return }
+                OpenTiming.log.log("\(self.name, privacy: .private): render cache \(html == nil ? "miss" : "hit", privacy: .public), read in \(OpenTiming.ms(since: started), format: .fixed(precision: 1), privacy: .public) ms")
+                self.readingCache = false
+                if let html { self.showCached(html) }
+                self.render()
+            }
+        }
+
+        private func showCached(_ html: String) {
+            guard let webView else { return }
             webView.callAsyncJavaScript("return midamShowCached(html, base)",
                                        arguments: ["html": html, "base": fileURL?.deletingLastPathComponent().absoluteString ?? ""],
                                        in: nil, in: world) { [weak self] result in
@@ -244,6 +335,7 @@ struct MarkdownView: NSViewRepresentable {
             guard force || read.text != text else { return }
             (text, stamp) = read
             render()
+            if let page, page === Store.shared.current?.page { LibraryModel.shared.opened(fileURL) } // read as it changes (D5)
         }
 
         func stop() {
@@ -255,14 +347,28 @@ struct MarkdownView: NSViewRepresentable {
 
         // MARK: Navigation
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { didLoad() }
+
+        /// The template and scripts are loaded (in this tab's own web view, or in the spare it took).
+        func didLoad() {
             guard !loaded else { return }
             loaded = true
+            OpenTiming.log.log("\(self.name, privacy: .private): template and scripts loaded +\(OpenTiming.ms(since: self.born), format: .fixed(precision: 1), privacy: .public) ms")
             applyReading()
             // A tab first shown well after launch may have changed on disk since it was read.
-            if let fileURL, let read = RenderCache.read(fileURL) { (text, stamp) = read }
-            showCached()
-            render()
+            let reading = ContinuousClock.now
+            if let fileURL, stamp == nil || stamp != Self.stamp(fileURL), let read = RenderCache.read(fileURL) {
+                (text, stamp) = read
+                OpenTiming.log.log("\(self.name, privacy: .private): file read again (\(self.text.utf8.count, privacy: .public) B) in \(OpenTiming.ms(since: reading), format: .fixed(precision: 1), privacy: .public) ms")
+            }
+            showCachedThenRender()
+        }
+
+        /// The file's mtime and size now, as RenderCache.read stamps them; nil if it cannot be read.
+        private static func stamp(_ url: URL) -> FileStamp? {
+            var st = stat()
+            guard stat(url.path, &st) == 0 else { return nil }
+            return FileStamp(mtime: Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9, size: Int(st.st_size))
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -293,11 +399,49 @@ struct MarkdownView: NSViewRepresentable {
     static let name = "midamToc"
     weak var page: Page?
 
-    init(page: Page) { self.page = page }
+    init(page: Page?) { self.page = page }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, message.body is String, let page else { return }
         page.tocCurrent = page.tocAnchor(message.body)
+    }
+}
+
+// MARK: Spare web view
+
+/// One web view made ahead, with the template and scripts loaded, which the next tab takes, so
+/// opening a document skips WebKit's start (a new web content process, the template, 511 KB of
+/// scripts). Made idle: after launch, and after each tab that took one has rendered. Dropped if
+/// its load fails or its process ends; a tab then makes its own.
+@MainActor private final class Spare: NSObject, WKNavigationDelegate {
+    private static var next: Spare?
+    let webView: PageWebView
+    let spy: TocSpy
+    private(set) var loaded = false
+
+    private init(_ made: (PageWebView, TocSpy)) {
+        (webView, spy) = made
+        super.init()
+        webView.navigationDelegate = self
+    }
+
+    static func warm() { if next == nil { next = Spare(MarkdownView.newWebView()) } }
+
+    /// The spare, for a tab that sets itself as its navigation delegate at once.
+    static func take() -> Spare? {
+        defer { next = nil }
+        return next
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { drop() }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { drop() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { drop() }
+
+    private func drop() {
+        guard Self.next === self else { return }
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: TocSpy.name, contentWorld: world)
+        Self.next = nil
     }
 }
 
@@ -331,14 +475,14 @@ func linkAction(_ url: URL, current: URL?) -> LinkAction {
 /// The document web view. Page script is off, so the page has no use for key equivalents:
 /// the menu goes first, which keeps app and system items (full screen, find, Go, tabs)
 /// working however WebKit routes a key. The selected tab's view takes focus, so Space and
-/// arrows scroll at once.
+/// arrows scroll at once; never from the sidebar's list (Sidebar.pageTakesFocus).
 final class PageWebView: WKWebView {
     weak var page: Page?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let window, !isHidden else { return }
-        DispatchQueue.main.async { [weak self] in window.makeFirstResponder(self) }
+        guard window != nil, !isHidden else { return }
+        DispatchQueue.main.async { [weak self] in if let self { Sidebar.pageTakesFocus(self) } }
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -495,8 +639,6 @@ final class PageWebView: WKWebView {
     var tocCurrent: String?
     /// There is a table of contents to show: headings, in 읽기.
     var tocAvailable: Bool { !source && !outline.isEmpty }
-    /// The table of contents has shown itself once for this tab, on its first showing.
-    @ObservationIgnored var tocIntroduced = false
     @ObservationIgnored weak var webView: WKWebView?
     @ObservationIgnored var fileURL: URL?
     @ObservationIgnored var reload: (() -> Void)?
@@ -511,7 +653,7 @@ final class PageWebView: WKWebView {
         visible = false
         Store.shared.findFocused = false
         run("midamFindClear()")
-        if let webView { webView.window?.makeFirstResponder(webView) }
+        if let webView { Sidebar.pageTakesFocus(webView) }
     }
 
     func search() { run("return midamFind(q, 0)", ["q": query]) }

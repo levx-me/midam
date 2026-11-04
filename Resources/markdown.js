@@ -22,8 +22,24 @@ let gfm = null, labels = {}, notes = new Map(), noteCount = 0;
 // each over the rest of the text) are skipped outright when there is nothing to find.
 let has = {};
 
+// marked's block rules, tried at the start of the rest of the document for every block. The
+// system WebKit runs a pattern with a counted group, such as hr's (?:-[\t ]*){3,}, in its regex
+// interpreter, which tries an anchored ^ pattern at every position: lexing grew with the square
+// of the length (144 KB: 1.7 s). The same patterns made sticky are tried at the start only; ^
+// without the m flag matches only there, so the matches are the same.
+function anchorBlockRules() {
+  const rules = marked.Lexer.rules.block.gfm;
+  for (const [k, re] of Object.entries(rules)) {
+    if (!(re instanceof RegExp) || !re.source.startsWith("^") || /[gmy]/.test(re.flags)) continue;
+    const at = new RegExp(re.source, re.flags + "y");
+    at.exec = function (s) { this.lastIndex = 0; return RegExp.prototype.exec.call(this, s); };
+    rules[k] = at;
+  }
+}
+
 // Markdown to HTML. `words` holds the localised alert titles and footnote labels.
 function midamParse(src, words) {
+  if (!gfm) anchorBlockRules();
   gfm ||= new marked.Marked({ gfm: true }, {
     extensions: [mathBlock, footnoteDef, mathInline, footnoteRef, emoji],
     renderer: { code: mathFence, blockquote: alertBox },
