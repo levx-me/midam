@@ -221,7 +221,7 @@ import UserNotifications
     func restore() {
         guard !restored else { return }
         restored = true
-        if project == nil, let last = savedTabs.current { switchProject(last, fillDefault: false) }
+        if project == nil, let last = savedTabs.current, FileManager.default.fileExists(atPath: last) { switchProject(last, fillDefault: false) }
         save()
         if tabCount > 0 { showWindow() }
     }
@@ -269,7 +269,8 @@ import UserNotifications
             let pick = s.selected ?? 0
             if files.indices.contains(pick) { select(files[pick], record: false) }
             Task { // conversations come back with their history, in order, without running
-                for (i, a) in s.agents.enumerated() {
+                // A project folder deleted since: skip it, or its error alert blocks launch before the window.
+                for (i, a) in s.agents.enumerated() where FileManager.default.fileExists(atPath: a.project) {
                     let show = pick == s.files.count + i
                     if let url = a.preview.flatMap(URL.init(string:)) { // loads when first shown
                         add(AgentTab(session: nil, project: a.project, group: root, preview: PreviewPage(url: url)), select: show)
