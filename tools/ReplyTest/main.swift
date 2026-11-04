@@ -58,6 +58,10 @@ assert(Reply().markdown(path: "/p/a.md", words: en) == "## a.md Review\n")
 r = Reply(notes: [note(1, 1, "q", "t")])
 assert(r.markdown(path: "/p/a.md", words: en).hasPrefix("## a.md Review\n\n1. `plan.md:L1`"))
 
+// An empty note (no words, or only spaces) is left out, and the numbering skips it.
+r = Reply(notes: [note(1, 1, "q", "  \n"), note(2, 2, "r", "t")])
+assert(r.markdown(path: "/p/a.md", words: en) == "## a.md Review\n\n1. `plan.md:L2`\n   > r\n   t\n")
+
 // Multi-line quote and text keep their lines, indented; blank quote lines stay a bare ">".
 r = Reply(notes: [note(3, 6, "line one\n\nline three", "why\nbecause")], verdict: .changes)
 assert(r.markdown(path: "/p/a.md", words: en) == """

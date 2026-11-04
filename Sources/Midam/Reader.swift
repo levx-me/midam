@@ -958,7 +958,11 @@ struct ReaderView: View {
                 Group {
                     if let terminal = agent.terminal { TerminalTabView(terminal: terminal, top: store.header) }
                     else if let preview = agent.preview { PreviewView(page: preview, top: store.header, ground: Color(nsColor: ground)) }
-                    else { ChatView(tab: agent, store: store, ink: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted"))) }
+                    else {
+                        ChatView(tab: agent, store: store, ink: Color(nsColor: theme.color("text")), muted: Color(nsColor: theme.color("muted")))
+                            // A floating panel covers the right edge: the chat keeps its cards' buttons clear of it.
+                            .padding(.trailing, store.panelOpen && floats ? PanelColumn.clamp(panelWidth) : 0)
+                    }
                 }
                 .id(agent.id)
                 .background(Color(nsColor: ground))

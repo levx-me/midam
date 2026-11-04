@@ -50,7 +50,9 @@ struct Reply: Codable, Equatable {
         var out = [head]
         let summary = self.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         if !summary.isEmpty { out.append(summary) }
-        let ordered = notes.sorted { ($0.start, $0.created) < ($1.start, $1.created) }
+        // A note left without words says nothing: it stays out of the reply.
+        let ordered = notes.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { ($0.start, $0.created) < ($1.start, $1.created) }
         for (i, note) in ordered.enumerated() {
             let bullet = "\(i + 1). "
             let pad = String(repeating: " ", count: bullet.count)

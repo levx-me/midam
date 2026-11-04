@@ -60,37 +60,37 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if tab.items.isEmpty {
-                        Text("Ask Claude for something: a plan, a document, a change to the app.")
-                            .foregroundStyle(muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
+        // The composer sits below the transcript, never over it: a card's buttons are always reachable.
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if tab.items.isEmpty {
+                            Text("Ask Claude for something: a plan, a document, a change to the app.")
+                                .foregroundStyle(muted)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 40)
+                        }
+                        ForEach(tab.items) { item in
+                            ChatRow(item: item, tab: tab, store: store, ink: ink, muted: muted,
+                                    last: item.id == tab.items.last(where: { if case .error = $0.kind { true } else { false } })?.id)
+                        }
+                        Color.clear.frame(height: 1).id("end")
                     }
-                    ForEach(tab.items) { item in
-                        ChatRow(item: item, tab: tab, store: store, ink: ink, muted: muted,
-                                last: item.id == tab.items.last(where: { if case .error = $0.kind { true } else { false } })?.id)
-                    }
-                    Color.clear.frame(height: 1).id("end")
+                    .frame(maxWidth: 720)
+                    .padding(.horizontal, 24)
+                    .padding(.top, store.header + 16)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: 720)
-                .padding(.horizontal, 24)
-                .padding(.top, store.header + 16)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity)
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: tab.items.last) { toEnd(proxy) }
+                .onChange(of: tab.waiting) { toEnd(proxy) } // a card, and the composer's "Waiting for you" line
             }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: tab.items.last) {
-                if reduceMotion { proxy.scrollTo("end", anchor: .bottom) }
-                else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
             Composer(tab: tab, store: store, muted: muted)
                 .frame(maxWidth: 720)
                 .padding(.horizontal, 24)
+                .padding(.top, 6)
                 .padding(.bottom, 14)
                 .frame(maxWidth: .infinity)
         }
@@ -107,6 +107,14 @@ struct ChatView: View {
         })
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(verbatim: tab.title))
+    }
+
+    /// To the transcript's end; again once the new rows are laid out, since the lazy stack only
+    /// estimates their height on the first pass.
+    private func toEnd(_ proxy: ScrollViewProxy) {
+        let go = { proxy.scrollTo("end", anchor: .bottom) }
+        if reduceMotion { go() } else { withAnimation(.easeOut(duration: 0.2), go) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { go() }
     }
 }
 
