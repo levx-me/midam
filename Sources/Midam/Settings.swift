@@ -16,7 +16,14 @@ enum Pref {
     static let lightTheme = "lightColorTheme" // ColorTheme id for the light appearance
     static let darkTheme = "darkColorTheme"   // ColorTheme id for the dark appearance
     static let agentTerminal = "agentTerminal" // Show as Terminal: new agents open as a terminal tab
-    static let all = [font, codeFont, size, tracking, leading, paragraph, measure, theme, lightTheme, darkTheme]
+    static let terminalFont = "terminalFont"          // monospaced family name, "" = system monospaced
+    static let terminalSize = "terminalFontSize"      // points
+    static let terminalSpacing = "terminalLineSpacing" // line height multiplier
+    static let terminalTheme = "terminalTheme"        // TerminalTheme raw value
+    static let terminalCursor = "terminalCursor"      // TerminalStyle.Cursor raw value
+    static let terminalBlink = "terminalCursorBlink"
+    static let all = [font, codeFont, size, tracking, leading, paragraph, measure, theme, lightTheme, darkTheme,
+                      terminalFont, terminalSize, terminalSpacing, terminalTheme, terminalCursor, terminalBlink]
 
     @MainActor static func reset() {
         for k in all { UserDefaults.standard.removeObject(forKey: k) }
@@ -41,6 +48,16 @@ struct Knob {
     static var size: Knob {
         Knob(key: Pref.size, label: "Text Size", initial: 1, range: 0.7...2, step: 0.05,
              format: { "\(Int(($0 * 100).rounded()))%" })
+    }
+
+    static var terminalSize: Knob {
+        Knob(key: Pref.terminalSize, label: "Font Size", initial: TerminalStyle().size, range: TerminalStyle.sizes, step: 1,
+             format: { "\(Int($0)) pt" })
+    }
+
+    static var terminalSpacing: Knob {
+        Knob(key: Pref.terminalSpacing, label: "Line Spacing", initial: TerminalStyle().spacing, range: TerminalStyle.spacings, step: 0.05,
+             format: { $0.formatted(.number.precision(.fractionLength(2))) })
     }
 }
 
@@ -617,7 +634,7 @@ struct ThemePreview: View {
 // MARK: Settings window
 
 struct SettingsView: View {
-    enum Tab: String { case general, theme, fonts }
+    enum Tab: String { case general, theme, fonts, terminal }
     @AppStorage(SettingsRoute.tabKey) private var tab = Tab.general.rawValue
 
     var body: some View {
@@ -631,6 +648,9 @@ struct SettingsView: View {
             FontSettings()
                 .tabItem { Label("Fonts", systemImage: "textformat") }
                 .tag(Tab.fonts.rawValue)
+            TerminalSettings()
+                .tabItem { Label("Terminal", systemImage: "terminal") }
+                .tag(Tab.terminal.rawValue)
         }
         .frame(width: 480)
         .tint(Color.accentColor)
@@ -868,7 +888,7 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                slider(.size, $size)
+                KnobSlider(knob: .size, value: $size)
                 PresetPicker(spacing: .tracking, index: $tracking).pickerStyle(.segmented)
                 PresetPicker(spacing: .leading, index: $leading).pickerStyle(.segmented)
             }
@@ -891,14 +911,20 @@ struct GeneralSettings: View {
         .scrollDisabled(true)
         .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    private func slider(_ k: Knob, _ v: Binding<Double>) -> some View {
-        LabeledContent(k.label) {
+/// A knob's slider with its value beside it.
+struct KnobSlider: View {
+    let knob: Knob
+    @Binding var value: Double
+
+    var body: some View {
+        LabeledContent(knob.label) {
             HStack(spacing: 10) {
-                Slider(value: v, in: k.range, step: k.step) { Text(k.label) }
+                Slider(value: $value, in: knob.range, step: knob.step) { Text(knob.label) }
                     .labelsHidden()
-                    .accessibilityValue(Text(verbatim: k.format(v.wrappedValue)))
-                Text(verbatim: k.format(v.wrappedValue))
+                    .accessibilityValue(Text(verbatim: knob.format(value)))
+                Text(verbatim: knob.format(value))
                     .monospacedDigit()
                     .foregroundStyle(Color(nsColor: .muted))
                     .frame(width: 52, alignment: .trailing)
@@ -917,7 +943,6 @@ struct FontSettings: View {
     @State private var query = ""
     @State private var tab = ListTab.recommended
     private let fonts = Fonts.all
-    private let mono = Fonts.monospaced
     @FocusState private var searching: Bool
     private let route = SettingsRoute.shared
 
@@ -942,8 +967,6 @@ struct FontSettings: View {
     }
 
     var body: some View {
-        let codePicks = RecommendedFonts.code
-        let codePicked = Set(codePicks.map(\.family))
         Form {
             Section {
                 TextField("Search Fonts", text: $query, prompt: Text("Search Fonts"))
@@ -967,24 +990,7 @@ struct FontSettings: View {
                     .foregroundStyle(Color(nsColor: .muted))
             }
             Section {
-                // A pop-up menu cannot hold tabs; it keeps the two as menu sections.
-                Picker("Code Font", selection: $codeFont) {
-                    Section("Recommended") {
-                        ForEach(codePicks, id: \.family) { p in
-                            VStack(alignment: .leading) {
-                                p.family.isEmpty ? Text("System Monospaced") : Text(verbatim: p.family)
-                                Text(verbatim: FontList.hintLine(p))
-                            }
-                            .tag(p.family)
-                        }
-                    }
-                    Section("All Fonts") {
-                        ForEach(mono.filter { !codePicked.contains($0) }, id: \.self) { Text(verbatim: $0).tag($0) }
-                        if !codeFont.isEmpty, !mono.contains(codeFont), !codePicked.contains(codeFont) {
-                            Text(verbatim: codeFont).tag(codeFont)
-                        }
-                    }
-                }
+                MonoFontPicker(label: "Code Font", family: $codeFont)
             }
             ResetRow()
         }
@@ -1099,5 +1105,154 @@ struct FontList: View {
         .focusable(false) // one tab stop for the list; ↓/↑ move within it
         .id(family)
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A monospaced family pop-up: the recommended coding fonts with their hints, then every other
+/// fixed-pitch family. A pop-up menu cannot hold tabs; it keeps the two as menu sections.
+struct MonoFontPicker: View {
+    let label: LocalizedStringKey
+    @Binding var family: String
+
+    var body: some View {
+        let picks = RecommendedFonts.code
+        let picked = Set(picks.map(\.family))
+        Picker(label, selection: $family) {
+            Section("Recommended") {
+                ForEach(picks, id: \.family) { p in
+                    VStack(alignment: .leading) {
+                        p.family.isEmpty ? Text("System Monospaced") : Text(verbatim: p.family)
+                        Text(verbatim: FontList.hintLine(p))
+                    }
+                    .tag(p.family)
+                }
+            }
+            Section("All Fonts") {
+                ForEach(Fonts.monospaced.filter { !picked.contains($0) }, id: \.self) { Text(verbatim: $0).tag($0) }
+                if !family.isEmpty, !Fonts.monospaced.contains(family), !picked.contains(family) {
+                    Text(verbatim: family).tag(family)
+                }
+            }
+        }
+    }
+}
+
+// MARK: Terminal tab
+
+/// The agent terminal's look (Terminal.app's Profiles, cut down): font, size and line spacing,
+/// a colour theme and the cursor. Open terminals follow at once.
+struct TerminalSettings: View {
+    @AppStorage(Pref.terminalFont) private var family = ""
+    @AppStorage(Pref.terminalSize) private var size = Knob.terminalSize.initial
+    @AppStorage(Pref.terminalSpacing) private var spacing = Knob.terminalSpacing.initial
+    @AppStorage(Pref.terminalTheme) private var theme = TerminalTheme.system.rawValue
+    @AppStorage(Pref.terminalCursor) private var cursor = TerminalStyle.Cursor.block.rawValue
+    @AppStorage(Pref.terminalBlink) private var blink = true
+
+    var body: some View {
+        let style = TerminalStyle(family: family, size: size, spacing: spacing, theme: theme, cursor: cursor, blink: blink)
+        Form {
+            Section {
+                TerminalPreview(style: style)
+            }
+            Section {
+                MonoFontPicker(label: "Font", family: $family)
+                KnobSlider(knob: .terminalSize, value: $size)
+                KnobSlider(knob: .terminalSpacing, value: $spacing)
+            }
+            Section {
+                Picker("Theme", selection: Binding(get: { style.theme }, set: { theme = $0.rawValue })) {
+                    ForEach(TerminalTheme.allCases) { t in
+                        Label { Text(verbatim: t.name) } icon: { Image(nsImage: t.swatch) }.tag(t)
+                    }
+                }
+            }
+            Section {
+                Picker("Cursor", selection: Binding(get: { style.cursor }, set: { cursor = $0.rawValue })) {
+                    Text("Block").tag(TerminalStyle.Cursor.block)
+                    Text("Bar").tag(TerminalStyle.Cursor.bar)
+                    Text("Underline").tag(TerminalStyle.Cursor.underline)
+                }
+                .pickerStyle(.segmented)
+                Toggle("Blink Cursor", isOn: $blink)
+            }
+            ResetRow()
+        }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A few lines of shell output in the chosen font, spacing, colours and cursor, laid out in
+/// cells the way SwiftTerm measures them. The cursor blinks unless Reduce Motion is on.
+struct TerminalPreview: View {
+    let style: TerminalStyle
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let font = AgentTerminal.font(style)
+        let cell = NSSize(width: ("W" as NSString).size(withAttributes: [.font: font]).width,
+                          height: ceil((font.ascender - font.descender + font.leading) * style.spacing))
+        let t = style.theme
+        let fg = Color(nsColor: t.foreground)
+        func ansi(_ i: Int) -> Color { Color(nsColor: t.ansiColor(i)) }
+        func line(_ text: Text) -> some View { text.frame(height: cell.height) }
+        let prompt = Text(verbatim: "~/midam").foregroundStyle(ansi(6)) + Text(verbatim: " $ ").foregroundStyle(fg)
+        return VStack(alignment: .leading, spacing: 0) {
+            line(prompt + Text(verbatim: "git status -s").foregroundStyle(fg))
+            line(Text(verbatim: " M").foregroundStyle(ansi(1)) + Text(verbatim: " Sources/Midam/Terminal.swift").foregroundStyle(fg))
+            line(Text(verbatim: "A ").foregroundStyle(ansi(2)) + Text(verbatim: " tools/TerminalStyleTest/main.swift").foregroundStyle(fg))
+            line(Text(verbatim: "??").foregroundStyle(ansi(1)) + Text(verbatim: " notes.md").foregroundStyle(fg))
+            HStack(spacing: 0) {
+                line(prompt)
+                TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                    let on = !style.blink || reduceMotion || Int(context.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
+                    cursor(cell).fill(fg.opacity(on ? 0.85 : 0))
+                }
+                .frame(width: cell.width, height: cell.height)
+            }
+        }
+        .font(Font(font))
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: t.background), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Preview"))
+        .accessibilityValue(Text(verbatim: t.name))
+    }
+
+    /// The cursor's shape in one cell: the whole cell, a bar at its left or a line along its foot.
+    private func cursor(_ cell: NSSize) -> Path {
+        switch style.cursor {
+        case .block: Path(CGRect(origin: .zero, size: cell))
+        case .bar: Path(CGRect(x: 0, y: 0, width: 2, height: cell.height))
+        case .underline: Path(CGRect(x: 0, y: cell.height - 2, width: cell.width, height: 2))
+        }
+    }
+}
+
+extension TerminalTheme {
+    /// The theme pop-up's swatch: the background with text, red, green and blue dots.
+    var swatch: NSImage {
+        let ground = background, dots = [foreground, ansiColor(1), ansiColor(2), ansiColor(4)]
+        let image = NSImage(size: NSSize(width: 34, height: 16), flipped: false) { rect in
+            let card = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+            ground.setFill()
+            card.fill()
+            NSColor.separatorColor.setStroke()
+            card.stroke()
+            for (i, dot) in dots.enumerated() {
+                dot.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 5 + CGFloat(i) * 6.5, y: 5.5, width: 5, height: 5)).fill()
+            }
+            return true
+        }
+        image.accessibilityDescription = name
+        return image
     }
 }

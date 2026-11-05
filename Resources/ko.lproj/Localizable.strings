@@ -381,3 +381,13 @@
 "Running elsewhere" = "다른 곳에서 실행 중";
 "Finish it in the terminal first" = "터미널에서 먼저 끝내 주세요";
 "Terminal" = "터미널";
+
+/* Settings: Terminal */
+"Font" = "글꼴";
+"Font Size" = "글꼴 크기";
+"Follow Appearance" = "모양 따르기";
+"Cursor" = "커서";
+"Block" = "블록";
+"Bar" = "세로 막대";
+"Underline" = "밑줄";
+"Blink Cursor" = "커서 깜박이기";

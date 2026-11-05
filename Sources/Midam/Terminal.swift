@@ -26,7 +26,7 @@ import SwiftTerm
     init(_ tab: TerminalTabState) {
         self.tab = tab
         view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
-        view.font = Self.font()
+        view.applyStyle()
         view.project = tab.project
         events.owner = self
         view.processDelegate = events
@@ -99,10 +99,12 @@ import SwiftTerm
         state = .ended(exitCode: code)
     }
 
-    /// The Code Font setting at the terminal's size, else the system monospaced font.
-    static func font(size: CGFloat = 13) -> NSFont {
-        let family = UserDefaults.standard.string(forKey: Pref.codeFont) ?? ""
-        return (family.isEmpty ? nil : NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size))
+    /// The Terminal font setting at its size; the system monospaced font by default or when the
+    /// family is gone.
+    static func font(_ style: TerminalStyle) -> NSFont {
+        let size = CGFloat(style.size)
+        if let face = BundledFonts.regular[style.family], let f = NSFont(descriptor: face, size: size) { return f }
+        return (style.family.isEmpty ? nil : NSFontManager.shared.font(withFamily: style.family, traits: [], weight: 5, size: size))
             ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
@@ -123,6 +125,42 @@ final class AgentTerminalView: LocalProcessTerminalView {
     var project: URL?
     var openLink: ((URL, Int?) -> Void)?
     private var pressed: (url: URL, line: Int?)?
+    private var style: TerminalStyle?
+
+    /// Applies the Terminal settings, only what changed, and keeps following them: on any change
+    /// to the defaults (live, from Settings) and, for Follow Appearance, on appearance changes.
+    func applyStyle() {
+        if style == nil {
+            // Selector-based: removed by Foundation when the view goes.
+            NotificationCenter.default.addObserver(self, selector: #selector(defaultsChanged),
+                                                   name: UserDefaults.didChangeNotification, object: nil)
+        }
+        let s = TerminalStyle(.standard), old = style
+        style = s
+        if old?.family != s.family || old?.size != s.size { font = AgentTerminal.font(s) }
+        if old?.spacing != s.spacing { lineSpacing = s.spacing }
+        if old?.theme != s.theme { applyColors(s.theme) }
+        if old?.cursorTag != s.cursorTag, let c = CursorStyle(tagName: s.cursorTag) { setCursorStyle(c) }
+    }
+
+    @objc nonisolated private func defaultsChanged() { // posted on whichever thread wrote the default
+        Task { @MainActor [weak self] in self?.applyStyle() }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        if let style, style.theme == .system { applyColors(.system) } // the model's colours resolve again
+    }
+
+    /// The theme's palette, text and background; Follow Appearance takes the system text colours,
+    /// resolved in this view's appearance.
+    private func applyColors(_ theme: TerminalTheme) {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            nativeForegroundColor = theme.foreground
+            nativeBackgroundColor = theme.background
+        }
+        installColors(theme.ansi.map { Color(red8: UInt16($0 >> 16 & 0xff), green8: UInt16($0 >> 8 & 0xff), blue8: UInt16($0 & 0xff)) })
+    }
 
     override func mouseDown(with event: NSEvent) {
         pressed = event.modifierFlags.contains(.command) ? link(at: event) : nil
@@ -142,7 +180,7 @@ final class AgentTerminalView: LocalProcessTerminalView {
         var chars: [UniChar] = [0x57], glyphs: [CGGlyph] = [0]
         guard CTFontGetGlyphsForCharacters(font, &chars, &glyphs, 1) else { return nil }
         let cellWidth = font.advancement(forGlyph: NSGlyph(glyphs[0])).width
-        let cellHeight = ceil(font.ascender - font.descender + font.leading)
+        let cellHeight = ceil((font.ascender - font.descender + font.leading) * lineSpacing)
         guard cellWidth > 0, cellHeight > 0 else { return nil }
         let row = Int((bounds.maxY - p.y) / cellHeight), column = Int((p.x - bounds.minX) / cellWidth)
         let rows = terminalStateSnapshot().visibleRows
@@ -152,5 +190,29 @@ final class AgentTerminalView: LocalProcessTerminalView {
         guard n < text.count else { return nil }
         let at = text.index(text.startIndex, offsetBy: n)
         return TerminalLinks.find(in: text, project: project).first { $0.range.contains(at) }.map { ($0.url, $0.line) }
+    }
+}
+
+extension TerminalStyle {
+    /// The Terminal settings as stored.
+    init(_ d: UserDefaults) {
+        let initial = TerminalStyle()
+        self.init(family: d.string(forKey: Pref.terminalFont) ?? "",
+                  size: d.object(forKey: Pref.terminalSize) as? Double ?? initial.size,
+                  spacing: d.object(forKey: Pref.terminalSpacing) as? Double ?? initial.spacing,
+                  theme: d.string(forKey: Pref.terminalTheme) ?? "",
+                  cursor: d.string(forKey: Pref.terminalCursor) ?? "",
+                  blink: d.object(forKey: Pref.terminalBlink) as? Bool ?? true)
+    }
+}
+
+extension TerminalTheme {
+    /// Text and background; the system text colours (dynamic) for Follow Appearance.
+    var foreground: NSColor { fg.map(Self.rgb) ?? .textColor }
+    var background: NSColor { bg.map(Self.rgb) ?? .textBackgroundColor }
+    func ansiColor(_ i: Int) -> NSColor { Self.rgb(ansi[i]) }
+
+    private static func rgb(_ v: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat(v >> 16 & 0xff) / 255, green: CGFloat(v >> 8 & 0xff) / 255, blue: CGFloat(v & 0xff) / 255, alpha: 1)
     }
 }

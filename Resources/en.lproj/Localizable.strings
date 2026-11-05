@@ -379,3 +379,13 @@
 "Running elsewhere" = "Running elsewhere";
 "Finish it in the terminal first" = "Finish it in the terminal first";
 "Terminal" = "Terminal";
+
+/* Settings: Terminal */
+"Font" = "Font";
+"Font Size" = "Font Size";
+"Follow Appearance" = "Follow Appearance";
+"Cursor" = "Cursor";
+"Block" = "Block";
+"Bar" = "Bar";
+"Underline" = "Underline";
+"Blink Cursor" = "Blink Cursor";
