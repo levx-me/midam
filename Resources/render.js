@@ -462,7 +462,7 @@ const visibleText = { acceptNode: n => (n.parentElement.checkVisibility() ? Node
 
 // The app's find list: the first FIND_LIST matches, each {before, hit, after, path}: the line around
 // it (whitespace collapsed, about 80 characters, one line of code in a code block) and the texts of
-// the headings it sits under, outermost first. In 원문 the headings are the Markdown's # lines.
+// the headings it sits under, outermost first. In 원본 the headings are the Markdown's # lines.
 const FIND_LIST = 500;
 function findList() {
   const pre = document.documentElement.dataset.view === "source" && document.querySelector("body > #source");

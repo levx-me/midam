@@ -20,13 +20,13 @@ struct TeamWords: Sendable {
 
     static let en = TeamWords()
     static let ko = TeamWords(
-        lead: "팀장", planner: "기획자", builder: "개발자", designer: "디자이너", checker: "검수자",
-        tester: "테스터", scout: "조사원", helper: "도우미", waiting: "답 대기", working: "작업 중…",
+        lead: "팀장", planner: "기획자", builder: "개발자", designer: "디자이너", checker: "검토자",
+        tester: "테스터", scout: "조사원", helper: "도우미", waiting: "답변 대기 중", working: "작업 중…",
         tool: ["Writing a document…": "문서를 쓰는 중…", "Changing the app…": "앱을 고치는 중…",
                "Running the app…": "앱을 실행하는 중…", "Checking…": "확인하는 중…", "Setting things up…": "준비하는 중…",
                "Saving the work…": "작업을 저장하는 중…", "Reading…": "읽는 중…", "Asking a teammate…": "팀원에게 맡기는 중…",
                "Looking things up…": "찾아보는 중…", "Asking you…": "물어보는 중…", "Planning…": "계획하는 중…",
-               "Using a connected service…": "연결된 서비스를 쓰는 중…", "Working…": "작업하는 중…"])
+               "Using a connected service…": "연결된 서비스를 쓰는 중…", "Working…": "작업 중…"])
 }
 
 enum TeamState: String, Codable, Sendable { case working, done, blocked, failed }

@@ -21,7 +21,7 @@ struct RenderKey: Codable, Equatable {
 /// The last finished 읽기 render of each document (the #content HTML after the diagram, math and
 /// highlight passes), so a tab shows its page at once on relaunch while the real render runs.
 /// One JSON file per document under Caches, at most 100 MB in all (least recently used go first).
-/// Never the 원문 view, which is cheap to build. Foundation only: checked by tools/RenderCacheTest.
+/// Never the 원본 view, which is cheap to build. Foundation only: checked by tools/RenderCacheTest.
 enum RenderCache {
     static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("dev.midam.Midam/render", isDirectory: true)

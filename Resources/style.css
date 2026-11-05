@@ -60,7 +60,7 @@ h4 { font-size: 1em; }
 h5, h6 { font-size: 0.875em; letter-spacing: calc(0.02em + var(--tracking)); }
 h1 + h2, h2 + h3, h3 + h4 { margin-top: 1em; }
 
-/* 읽기 wears the same colours as 원문, element for element, from the same tokens:
+/* 읽기 wears the same colours as 원본, element for element, from the same tokens:
    heading = .hljs-section, list marker = .hljs-bullet, link = the link text (body > #source .hljs-string),
    code = .hljs-code, blockquote = .hljs-quote. Body text, bold and italic stay --text. */
 body > #content :is(h1, h2, h3, h4, h5, h6) { color: var(--heading); }

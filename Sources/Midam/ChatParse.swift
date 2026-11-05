@@ -302,7 +302,7 @@ struct ChatParse {
     /// "Running the app…" 앱을 실행하는 중…, "Checking…" 확인하는 중…, "Setting things up…" 준비하는 중…,
     /// "Saving the work…" 작업을 저장하는 중…, "Reading…" 읽는 중…, "Asking a teammate…" 팀원에게 맡기는 중…,
     /// "Looking things up…" 찾아보는 중…, "Asking you…" 물어보는 중…, "Planning…" 계획하는 중…,
-    /// "Using a connected service…" 연결된 서비스를 쓰는 중…, "Working…" 작업하는 중….
+    /// "Using a connected service…" 연결된 서비스를 쓰는 중…, "Working…" 작업 중….
     static func friendly(_ name: String, _ input: [String: Any]) -> (line: String, subject: String?) {
         let path = input["file_path"] as? String ?? input["notebook_path"] as? String ?? input["path"] as? String
         let file = path.map { ($0 as NSString).lastPathComponent }

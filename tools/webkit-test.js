@@ -284,7 +284,7 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("find in a long page: boxes only near the window, drawn where it scrolls", f.band.few > 0 && f.band.few < f.band.count / 2 && f.band.last, f.band);
   check("find closed: no box, layer or mark left", f.left === 0 && f.highlights === 0, f);
 
-  // 8. The find list: the line around each match, its heading path, code lines, 원문, the cap, a jump.
+  // 8. The find list: the line around each match, its heading path, code lines, 원본, the cap, a jump.
   const L = await page.evaluate(async () => {
     const long = "word ".repeat(40);
     await midamRender("---\ntitle: t\n# a YAML comment\n---\n\n# Setup\n\n" + long + "deposit " + long + "\n\n## Install\n\nRun   the\n  deposit\tnow.\n\n" +
@@ -312,7 +312,7 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("find list: one line of a code block", hit(3).before === "let " && hit(3).after === " = 2; // here", hit(3));
   check("find list: a list item", hit(4).before === "one " && hit(4).after === " item", hit(4));
   check("find go: the clicked match becomes current; a step goes on from it", L.go.index === 4 && L.at === 3 && L.stepped.index === 5 && !("matches" in L.go), L);
-  check("find list in 원문: paths from the # lines (not in fences or front matter), lines from the source",
+  check("find list in 원본: paths from the # lines (not in fences or front matter), lines from the source",
     L.src.length === 5 && L.src[1] === "Setup › Install | [deposit] now." && L.src[3].startsWith("Setup › Use | let [deposit] = 2;"), L.src);
   check("find list: capped at 500, the count is every match", L.many[0] === 700 && L.many[1] === 500 && L.many[2] === "Deposit", L.many);
 

@@ -2,7 +2,7 @@
 
 The page colour themes in `themes.json`: the light list and the dark list, each with Midam
 first (the default, and the fallback for an unknown stored id). A theme colours the document
-only (both 읽기 and 원문); the window chrome, the glass capsules, the controls and the accent stay
+only (both 읽기 and 원본); the window chrome, the glass capsules, the controls and the accent stay
 Midam's. Swift (`ColorTheme` in `Settings.swift`) reads the file and passes the chosen theme's
 colours to `render.js` `midamStyle()` as arguments; both sides accept only token names with
 `#rrggbb` values. `python3 tools/theme-contrast.py` checks every text token reaches WCAG AA
@@ -15,8 +15,8 @@ colours to `render.js` `midamStyle()` as arguments; both sides accept only token
 | `bg`, `code-bg` | page and code background (`code-bg` also tints inline code) |
 | `hairline` | rules, table lines, `kbd` edges |
 | `find` | base of the find, selection and `<mark>` highlights (mixed at 18-34% over the page) |
-| `text`, `muted`, `faint` | body text; secondary (table header rule); faintest (a link's URL in 원문) |
-| `heading`, `marker`, `link`, `code`, `quote` | the Markdown elements, the same token in 읽기 and 원문 (`.hljs-section`, `.hljs-bullet`, link text, `.hljs-code`, `.hljs-quote`) |
+| `text`, `muted`, `faint` | body text; secondary (table header rule); faintest (a link's URL in 원본) |
+| `heading`, `marker`, `link`, `code`, `quote` | the Markdown elements, the same token in 읽기 and 원본 (`.hljs-section`, `.hljs-bullet`, link text, `.hljs-code`, `.hljs-quote`) |
 | `tk-keyword` … `tk-meta` | highlight.js tokens in fenced code |
 
 `mono: true` (Midam only) sets keywords in semibold, since its keywords share the ink of the text.

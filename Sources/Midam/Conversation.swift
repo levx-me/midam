@@ -167,7 +167,7 @@ final class Conversation: ObservableObject {
         input = nil
         turn = false
         queue = []
-        let error = status == 0 || status == SIGTERM ? nil : (stderrTail.last ?? "Claude stopped unexpectedly.") // Claude가 뜻밖에 멈췄어요.
+        let error = status == 0 || status == SIGTERM ? nil : (stderrTail.last ?? "Claude stopped unexpectedly.") // Claude가 예기치 않게 멈췄어요.
         end(error)
     }
 

@@ -195,7 +195,7 @@ struct StripIcon<Glyph: View>: View {
     }
 }
 
-/// 원문 보기 (⌘/): the raw Markdown or the reading view, its </> in the accent colour on a soft
+/// 원본 보기 (⌘/): the raw Markdown or the reading view, its </> in the accent colour on a soft
 /// disc while the source shows.
 struct SourceToggle: View {
     let page: Page
