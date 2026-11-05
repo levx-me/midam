@@ -508,14 +508,7 @@ final class PageWebView: WKWebView {
             if c == "[" { Store.shared.goBack(); return true }
             if c == "]" { Store.shared.goForward(); return true }
         }
-        // ⇧⌘[ / ⇧⌘]: previous / next tab, as in Safari and Finder (the menu shows ⌃⇧Tab / ⌃Tab).
-        // By character: charactersIgnoringModifiers keeps Shift, so US and Korean 2-set give { and };
-        // [ and ] cover a layout whose shifted bracket key types the bracket itself.
-        if event.type == .keyDown, mods == [.command, .shift] {
-            let c = event.charactersIgnoringModifiers ?? ""
-            if c == "{" || c == "[" { Store.shared.step(-1); return true }
-            if c == "}" || c == "]" { Store.shared.step(1); return true }
-        }
+        // ⇧⌘[ / ⇧⌘] are taken app-wide by the window's key monitor (Reader.swift, tabBracket).
         return NSApp.mainMenu?.performKeyEquivalent(with: event) == true || super.performKeyEquivalent(with: event)
     }
 

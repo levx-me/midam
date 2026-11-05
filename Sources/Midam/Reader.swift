@@ -741,7 +741,8 @@ import UserNotifications
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             MainActor.assumeIsolated {
                 self?.hintKeys(event)
-                return event.type == .keyDown && self?.singleKeyBypass(event) == true
+                guard event.type == .keyDown, let self else { return false }
+                return self.tabBracket(event) || self.singleKeyBypass(event)
             } ? nil : event
         }
         // Hints go when the app or the window stops being the one typed into.
@@ -751,6 +752,18 @@ import UserNotifications
             })
         }
         return w
+    }
+
+    /// ⇧⌘[ / ⇧⌘]: previous / next tab, as in Safari and Finder, wherever focus is in the main window
+    /// (chat, terminal, sidebar; the menu shows ⌃⇧Tab / ⌃Tab). By character: Shift gives { and } on
+    /// US and Korean 2-set; [ and ] cover a layout whose shifted bracket key types the bracket.
+    private func tabBracket(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
+        guard mods == [.command, .shift], event.window === window else { return false }
+        let c = event.charactersIgnoringModifiers ?? ""
+        if c == "{" || c == "[" { Store.shared.step(-1); return true }
+        if c == "}" || c == "]" { Store.shared.step(1); return true }
+        return false
     }
 
     /// ⌘ pressed alone starts the half-second wait for the hints; any key, another modifier or
