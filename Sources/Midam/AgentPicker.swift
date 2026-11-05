@@ -18,6 +18,7 @@ struct AgentPicker: View {
     @State private var creating = false
     @State private var opened = false
     @FocusState private var nameFocused: Bool
+    @FocusState private var listFocused: Bool
 
     private var shown: [RecentSession] { recent?.filter { $0.matches(query) } ?? [] }
     private var selected: RecentSession? { selection.flatMap { id in recent?.first { $0.id == id } } }
@@ -37,6 +38,11 @@ struct AgentPicker: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 8) {
                         TextField("Search conversations", text: $query).textFieldStyle(.roundedBorder)
+                            .onKeyPress(.downArrow) { // from the search field into the list
+                                if selection == nil { selection = shown.first?.id }
+                                listFocused = true
+                                return .handled
+                            }
                         list
                     }
                     .frame(width: 300)
@@ -105,6 +111,7 @@ struct AgentPicker: View {
                     .accessibilityElement(children: .combine)
                 }
                 .listStyle(.bordered)
+                .focused($listFocused)
                 .contextMenu(forSelectionType: RecentSession.ID.self) { ids in
                     Button("Open") { open(ids.first) }
                 } primaryAction: { ids in open(ids.first) } // double-click
