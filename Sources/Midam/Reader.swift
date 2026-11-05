@@ -431,7 +431,7 @@ import UserNotifications
         all.current = project
         func tabs(_ files: [OpenFile], _ agents: [AgentTab], _ selected: UUID?) -> ProjectTabsSave {
             // A conversation nothing was said in yet has no history to resume: it is not kept.
-            let kept = agents.filter { $0.terminal != nil || $0.preview != nil || $0.resumable || !$0.items.isEmpty }
+            let kept = agents.filter { !$0.readOnly }.filter { $0.terminal != nil || $0.preview != nil || $0.resumable || !$0.items.isEmpty }
             let ids = files.map(\.id) + kept.map(\.id)
             return ProjectTabsSave(files: files.map(\.url.path), agents: kept.map(\.save), selected: selected.flatMap { ids.firstIndex(of: $0) })
         }
@@ -494,6 +494,80 @@ import UserNotifications
         }
     }
 
+    /// A session run outside Midam, opened for reading: the same chat tab with its history paged
+    /// the same way, but no composer and no process. Selects the tab if it is open already.
+    func openExternal(_ s: RecentSession) {
+        showWindow()
+        let root = ProjectRoot.of(file: s.projectRoot, registered: LibraryModel.shared.registered, isFolder: true)
+        if !root.registered { SidebarState.shared.reveal = [root.root] }
+        switchProject(root.root, fillDefault: false)
+        if let open = allAgents.first(where: { $0.session == s.sessionID }) { return select(open) }
+        Task {
+            listen()
+            do {
+                let session = try await host.view(project: s.projectRoot, session: s.sessionID)
+                guard allAgents.first(where: { $0.session == session }) == nil else { return } // opened meanwhile
+                let tab = AgentTab(session: session, project: s.projectRoot, group: root.root)
+                tab.makeReadOnly(s)
+                tab.runningElsewhere = ExternalSessions.running(lastActive: s.lastActive, now: Date())
+                add(tab, select: true)
+                for item in (try? await host.items(session)) ?? [] { tab.upsert(item) }
+                tab.info = try? await host.info(session)
+                if let file = Conversation.transcript(project: URL(fileURLWithPath: s.projectRoot), id: session) {
+                    tab.watch = FileWatch(path: file.path) { [weak self, weak tab] in
+                        if let self, let tab { self.externalChanged(tab, file: file) }
+                    }
+                    recheckRunning(tab, file: file)
+                }
+            } catch {
+                NSApp.presentError(error)
+            }
+        }
+    }
+
+    /// Continue Here: the external session as a normal agent, resumed with `--resume` (the picker's
+    /// path). The read-only tab goes.
+    func adopt(_ s: RecentSession) {
+        guard let tab = allAgents.first(where: { $0.session == s.sessionID && $0.readOnly }),
+              !tab.runningElsewhere else { return }
+        agents.removeAll { $0.id == tab.id }
+        parked[tab.group]?.agents.removeAll { $0.id == tab.id }
+        tab.watch?.cancel()
+        Task {
+            try? await host.close(s.sessionID) // so open() reads it afresh and records it
+            openAgent(project: s.projectRoot, resume: s.sessionID)
+        }
+    }
+
+    /// The transcript changed: newer items in, the running badge recomputed.
+    // ponytail: the newest page is read again and merged by item id (older pages stay); a long
+    // tail written while paging may repeat pages the tab has, which prepend() skips.
+    private func externalChanged(_ tab: AgentTab, file: URL) {
+        guard let s = tab.session, let project = tab.external?.projectRoot else { return }
+        recheckRunning(tab, file: file)
+        Task {
+            try? await host.close(s)
+            guard allAgents.contains(where: { $0.id == tab.id }), (try? await host.view(project: project, session: s)) != nil else { return }
+            guard allAgents.contains(where: { $0.id == tab.id }) else { try? await host.close(s); return } // closed meanwhile
+            for item in (try? await host.items(s)) ?? [] { tab.upsert(item) }
+            tab.info = try? await host.info(s)
+        }
+    }
+
+    /// `runningElsewhere` from the file's mtime; once it is on, looked at again when it would end.
+    private func recheckRunning(_ tab: AgentTab, file: URL) {
+        tab.recheck?.cancel()
+        guard let m = LibraryScanner.mtime(file.path) else { return }
+        let left = m.addingTimeInterval(ExternalSessions.runningWithin).timeIntervalSinceNow
+        tab.runningElsewhere = left >= 0
+        guard left >= 0 else { return }
+        let item = DispatchWorkItem { [weak self, weak tab] in
+            MainActor.assumeIsolated { if let self, let tab { self.recheckRunning(tab, file: file) } }
+        }
+        tab.recheck = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + left + 0.5, execute: item)
+    }
+
     private func terminalTab(_ state: TerminalTabState, group: String) -> AgentTab {
         let t = AgentTerminal(state)
         t.openLink = { [weak self] url, _ in self?.open(url) }
@@ -521,6 +595,8 @@ import UserNotifications
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         agents.removeAll { $0.id == tab.id }
+        tab.watch?.cancel()
+        tab.recheck?.cancel()
         if let s = tab.session { LibraryModel.shared.setBlocked(s, root: tab.group, false) }
         tab.terminal?.terminate()
         if let s = tab.session, tab.terminal == nil { Task { try? await host.close(s) } }
@@ -847,7 +923,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// No live watching in the demo (D13): the list is brought up to date on a return to the app,
     /// unless a scan is running or finished under a minute ago.
-    func applicationDidBecomeActive(_ notification: Notification) { LibraryModel.shared.refresh() }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        LibraryModel.shared.refresh()
+        ExternalSessionsModel.shared.refresh()
+    }
 
     /// Files from Finder, the Dock and `open`; midam:// links from the `midam` command (Store.handle).
     func application(_ application: NSApplication, open urls: [URL]) {

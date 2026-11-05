@@ -27,6 +27,16 @@ import SwiftUI
     @Published var unseen = false
     /// A history page is on its way (AgentHost.earlier).
     var loadingEarlier = false
+    /// A session run outside Midam, shown for reading: no composer, nothing started (Store.openExternal).
+    /// The designer's bar reads this and `runningElsewhere`, and calls `store.adopt(external)`.
+    private(set) var external: RecentSession?
+    var readOnly: Bool { external != nil }
+    /// The transcript was written to within ExternalSessions.runningWithin: Continue Here waits.
+    @Published var runningElsewhere = false
+    var watch: FileWatch?
+    var recheck: DispatchWorkItem?
+
+    func makeReadOnly(_ s: RecentSession) { external = s }
 
     init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil, preview: PreviewPage? = nil) {
         self.session = session
@@ -147,12 +157,14 @@ struct ChatView: View {
                     }
                 }
             }
-            Composer(tab: tab, store: store, muted: muted)
-                .frame(maxWidth: 720)
-                .padding(.horizontal, 24)
-                .padding(.top, 6)
-                .padding(.bottom, 14)
-                .frame(maxWidth: .infinity)
+            if !tab.readOnly {
+                Composer(tab: tab, store: store, muted: muted)
+                    .frame(maxWidth: 720)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
+                    .frame(maxWidth: .infinity)
+            }
         }
         // Links in replies and errors follow the documents' rules: web pages in the browser,
         // Markdown in Midam, any other file only shown in Finder, never opened or run.

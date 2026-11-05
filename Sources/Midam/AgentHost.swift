@@ -9,6 +9,9 @@ protocol AgentHost: AnyObject {
     /// A new session in `project`, or `resume` an earlier one (its history is in `items` on return).
     /// Nothing runs until the first send. Returns the session id.
     func open(project: String, resume: String?) async throws -> String
+    /// An earlier session's history for reading only (a session run outside Midam): paged by
+    /// `earlier` like an opened one, never recorded in the registry, never started. `close` ends it.
+    func view(project: String, session: String) async throws -> String
     func close(_ session: String) async throws
     func send(_ session: String, text: String) async throws
     func interrupt(_ session: String) async throws
@@ -85,6 +88,14 @@ final class LocalAgentHost: AgentHost {
     init(library: LibraryModel? = nil) { self.library = library }
 
     func open(project: String, resume: String?) async throws -> String {
+        try await open(project: project, resume: resume, record: true)
+    }
+
+    func view(project: String, session: String) async throws -> String {
+        try await open(project: project, resume: session, record: false)
+    }
+
+    private func open(project: String, resume: String?, record: Bool) async throws -> String {
         var dir: ObjCBool = false
         guard project.hasPrefix("/"), FileManager.default.fileExists(atPath: project, isDirectory: &dir), dir.boolValue else { throw HostError.noProject }
         if let resume {
@@ -99,7 +110,7 @@ final class LocalAgentHost: AgentHost {
         sessions[id] = (c, project)
         sent[id] = (c.items, try info(of: id))
         c.changed = { [weak self] in self?.emit(id) }
-        if let library, !library.conversations(in: project).contains(where: { $0.sessionID == id }) {
+        if record, let library, !library.conversations(in: project).contains(where: { $0.sessionID == id }) {
             library.addConversation(AgentConversation(sessionID: id, root: project))
         }
         return id

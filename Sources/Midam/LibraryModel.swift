@@ -301,6 +301,9 @@ import AppKit
 
     func conversations(in root: String) -> [AgentConversation] { conversations.filter { $0.root == root } }
 
+    /// The sessions Midam runs, which the external list leaves out.
+    var managedSessionIDs: Set<String> { Set(conversations.compactMap(\.sessionID)) }
+
     /// Registers the conversation's project too.
     func addConversation(_ c: AgentConversation) {
         register(root: c.root)

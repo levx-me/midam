@@ -87,6 +87,17 @@ enum RecentSessions {
     // ponytail: reads only the first and last 256 KB of each transcript; a title or cwd outside
     // them is missed (the session then falls back to its first prompt, or is skipped without a cwd).
     static func load(home: String = NSHomeDirectory(), limit: Int = 300) -> [RecentSession] {
+        var out: [RecentSession] = []
+        for f in files(home: home).sorted(by: { $0.mtime > $1.mtime }) {
+            guard out.count < limit else { break }
+            guard let (cwd, topic) = read(f.path), let cwd else { continue }
+            out.append(RecentSession(agent: .claude, sessionID: f.id, projectRoot: cwd, topic: topic, lastActive: f.mtime))
+        }
+        return out
+    }
+
+    /// Every `~/.claude/projects/*/<id>.jsonl` with a plain session id, and its mtime.
+    static func files(home: String) -> [(path: String, id: String, mtime: Date)] {
         let fm = FileManager.default, base = home + "/.claude/projects"
         var files: [(path: String, id: String, mtime: Date)] = []
         for slug in (try? fm.contentsOfDirectory(atPath: base)) ?? [] where !slug.hasPrefix(".") {
@@ -95,14 +106,7 @@ enum RecentSessions {
                 if WritingSession.isValidID(id), let m = LibraryScanner.mtime(p) { files.append((p, id, m)) }
             }
         }
-        files.sort { $0.mtime > $1.mtime }
-        var out: [RecentSession] = []
-        for f in files {
-            guard out.count < limit else { break }
-            guard let (cwd, topic) = read(f.path), let cwd else { continue }
-            out.append(RecentSession(agent: .claude, sessionID: f.id, projectRoot: cwd, topic: topic, lastActive: f.mtime))
-        }
-        return out
+        return files
     }
 
     /// The session's cwd and topic, from the head and tail of the file.
