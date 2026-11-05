@@ -67,5 +67,17 @@ assert(found.map(\.sessionID) == [b, a])
 try! FileManager.default.removeItem(atPath: dir + "/" + a + ".jsonl")
 found = scan()
 assert(found.map(\.sessionID) == [b] && cache.count == 1, "a deleted file leaves the cache")
+
+// A session resumed from another folder has a file in each: one row, the newest file's.
+let moved = home + "/.claude/projects/-b"
+try! FileManager.default.createDirectory(atPath: moved, withIntermediateDirectories: true)
+try! FileManager.default.copyItem(atPath: dir + "/" + b + ".jsonl", toPath: moved + "/" + b + ".jsonl")
+let movedLine = #"{"type":"user","cwd":"/p/moved","message":{"role":"user","content":"hello"}}"# + "\n"
+try! movedLine.write(toFile: moved + "/" + b + ".jsonl", atomically: true, encoding: .utf8)
+try! FileManager.default.setAttributes([.modificationDate: real.addingTimeInterval(-10)], ofItemAtPath: moved + "/" + b + ".jsonl")
+found = scan()
+assert(found.map(\.sessionID) == [b] && found[0].projectRoot == "/p/moved", "\(found.map(\.projectRoot))")
+assert(RecentSessions.files(home: home).map(\.id).sorted() == [b, c].sorted()) // c: the old one, outside the window
+assert(RecentSessions.load(home: home).map(\.projectRoot) == ["/p/moved", "/p/old"])
 try? FileManager.default.removeItem(atPath: home)
 print("ExternalSessionsTest ok")

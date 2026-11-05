@@ -96,17 +96,19 @@ enum RecentSessions {
         return out
     }
 
-    /// Every `~/.claude/projects/*/<id>.jsonl` with a plain session id, and its mtime.
+    /// Every session in `~/.claude/projects/*/<id>.jsonl` with a plain session id, and its mtime.
+    /// One per id: a session resumed from another folder has a file in each, and the newest is
+    /// the one in use (two rows with one id crash the sidebar's outline view).
     static func files(home: String) -> [(path: String, id: String, mtime: Date)] {
         let fm = FileManager.default, base = home + "/.claude/projects"
-        var files: [(path: String, id: String, mtime: Date)] = []
+        var newest: [String: (path: String, id: String, mtime: Date)] = [:]
         for slug in (try? fm.contentsOfDirectory(atPath: base)) ?? [] where !slug.hasPrefix(".") {
             for f in (try? fm.contentsOfDirectory(atPath: base + "/" + slug)) ?? [] where f.hasSuffix(".jsonl") {
                 let p = base + "/" + slug + "/" + f, id = String(f.dropLast(6))
-                if WritingSession.isValidID(id), let m = LibraryScanner.mtime(p) { files.append((p, id, m)) }
+                if WritingSession.isValidID(id), let m = LibraryScanner.mtime(p), newest[id].map({ $0.mtime < m }) ?? true { newest[id] = (p, id, m) }
             }
         }
-        return files
+        return Array(newest.values)
     }
 
     /// The session's cwd and topic, from the head and tail of the file.

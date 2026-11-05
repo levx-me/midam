@@ -72,7 +72,8 @@ enum ExternalSessions {
     }
 
     private func finish(_ found: [RecentSession], _ cache: [String: ExternalSessions.Cached], home: String) {
-        (sessions, self.cache, scanning) = (found, cache, false)
+        if found != sessions { sessions = found } // an unchanged scan does not redraw the sidebar
+        (self.cache, scanning) = (cache, false)
         if again { again = false; refresh(home: home) }
     }
 

@@ -541,7 +541,12 @@ struct Sidebar: View {
     /// A project, its agents, its kinds and their documents. `pinned` is the pinned section's rows, nil in All.
     private func tree(_ project: LibraryProject, pinned: [LibraryProject]?) -> some View {
         DisclosureGroup(isExpanded: state.isOpen(project.id)) {
-            ForEach(state.agents(of: project.id)) { agentTree($0, in: project) }
+            // The id changes when an agent gains or loses its documents, so the outline view
+            // replaces the row: turning a leaf into a group in place crashes it while it expands.
+            ForEach(state.agents(of: project.id).map { c in
+                let docs = written(by: c, in: project)
+                return (id: docs.isEmpty ? c.id : c.id + "\u{1F}docs", c: c, docs: docs)
+            }, id: \.id) { agentTree($0.c, docs: $0.docs) }
             ForEach(state.externals(of: project.id)) { s in
                 ExternalRow(session: s) { primary(.external(s.sessionID)) }
                     .tag(SidebarItem.external(s.sessionID))
@@ -566,10 +571,9 @@ struct Sidebar: View {
     }
 
     /// An agent, and under it the documents its session wrote, newest first.
-    @ViewBuilder private func agentTree(_ c: AgentConversation, in project: LibraryProject) -> some View {
+    @ViewBuilder private func agentTree(_ c: AgentConversation, docs: [LibraryDoc]) -> some View {
         let row = AgentRow(conversation: c, tab: c.sessionID.flatMap(store.agentTab(session:))) { primary(.agent(c.id)) }
             .tag(SidebarItem.agent(c.id))
-        let docs = written(by: c, in: project)
         if docs.isEmpty { row }
         else {
             DisclosureGroup(isExpanded: state.isOpen("agent\u{1F}" + c.id)) {
