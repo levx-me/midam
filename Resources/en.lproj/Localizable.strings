@@ -372,3 +372,10 @@
 "Tablet" = "Tablet";
 "Phone" = "Phone";
 "New" = "New";
+
+/* Sessions run outside Midam (a terminal's claude) */
+"This conversation ran outside Midam" = "This conversation ran outside Midam";
+"Continue Here" = "Continue Here";
+"Running elsewhere" = "Running elsewhere";
+"Finish it in the terminal first" = "Finish it in the terminal first";
+"Terminal" = "Terminal";

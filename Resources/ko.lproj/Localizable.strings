@@ -374,3 +374,10 @@
 "Tablet" = "태블릿";
 "Phone" = "휴대폰";
 "New" = "새로 열림";
+
+/* Sessions run outside Midam (a terminal's claude) */
+"This conversation ran outside Midam" = "터미널에서 실행한 대화";
+"Continue Here" = "여기서 이어가기";
+"Running elsewhere" = "다른 곳에서 실행 중";
+"Finish it in the terminal first" = "터미널에서 먼저 끝내 주세요";
+"Terminal" = "터미널";

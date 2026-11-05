@@ -128,6 +128,15 @@ struct ProjectDrag: Transferable, Codable {
         return unreadOnly ? [] : all
     }
 
+    /// A project's sessions run outside Midam, filtered as `agents(of:)` are.
+    func externals(of root: String) -> [RecentSession] {
+        let library = LibraryModel.shared
+        let all = ExternalSessionsModel.shared.rows(for: root, roots: library.registered.sorted(), managed: library.managedSessionIDs)
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if searching, !q.isEmpty { return all.filter { !Library.ranges(of: q, in: $0.topic).isEmpty } }
+        return unreadOnly ? [] : all
+    }
+
     /// While a filter is on, groups it brings into view open once; one the user then closes stays closed.
     func autoExpand(_ keys: Set<String>) {
         guard filtering else { return }
@@ -217,6 +226,8 @@ enum SidebarItem: Hashable {
     case doc(String)
     /// A document listed under the agent (conversation id) that wrote it.
     case agentDoc(String, String)
+    /// A session run outside Midam: its session id (ExternalSessionsModel).
+    case external(String)
 }
 
 /// Counts and times as the sidebar words them, in the app's language.
@@ -369,6 +380,7 @@ struct Sidebar: View {
     @ObservedObject var store: Store
     @ObservedObject private var library = LibraryModel.shared
     @ObservedObject private var state = SidebarState.shared
+    @ObservedObject private var external = ExternalSessionsModel.shared // its rows (state.externals)
     @State private var listFocused = false
     @State private var lastSelection: SidebarItem?
 
@@ -516,6 +528,7 @@ struct Sidebar: View {
             revealPending()
         }
         .onChange(of: store.project) { revealPending() } // a project made by New Project is listed already
+        .onAppear { external.refresh() } // also at launch and on each return to the app
         .accessibilityLabel("Documents")
         .onChange(of: state.scrollTarget) { _, target in
             guard let target else { return }
@@ -529,6 +542,10 @@ struct Sidebar: View {
     private func tree(_ project: LibraryProject, pinned: [LibraryProject]?) -> some View {
         DisclosureGroup(isExpanded: state.isOpen(project.id)) {
             ForEach(state.agents(of: project.id)) { agentTree($0, in: project) }
+            ForEach(state.externals(of: project.id)) { s in
+                ExternalRow(session: s) { primary(.external(s.sessionID)) }
+                    .tag(SidebarItem.external(s.sessionID))
+            }
             ForEach(project.groups) { group in
                 let key = SidebarState.key(project, group.kind)
                 DisclosureGroup(isExpanded: state.isOpen(key)) {
@@ -610,6 +627,8 @@ struct Sidebar: View {
         guard let here = store.current?.url.resolvingSymlinksInPath().path, let id = library.docAtPath[here] else {
             if let s = store.currentAgent?.session, let c = library.conversations.first(where: { $0.sessionID == s }) {
                 state.selection = .agent(c.id) // a conversation: its agent's row
+            } else if let t = store.currentAgent, t.readOnly, let s = t.session {
+                state.selection = .external(s) // read-only: its row, until Continue Here makes it an agent
             } else {
                 state.selection = store.project.map { .project($0) }
             }
@@ -640,6 +659,9 @@ struct Sidebar: View {
         case .agent(let id):
             guard let c = library.conversations.first(where: { $0.id == id }) else { return }
             store.openAgent(project: c.root, resume: c.sessionID) // its tab, opened again if closed
+        case .external(let id):
+            guard let s = external.sessions.first(where: { $0.sessionID == id }) else { return }
+            store.openExternal(s) // read-only; its tab comes forward if open
         case .kind(let pid, let kind):
             state.expanded.formSymmetricDifference([pid + "\u{1F}" + kind.rawValue])
         }
@@ -668,7 +690,7 @@ struct Sidebar: View {
             }
         case .project(let id):
             ProjectMenu(id: id)
-        case .kind, .agent:
+        case .kind, .agent, .external:
             EmptyView()
         }
     }
@@ -1187,6 +1209,35 @@ private struct AgentRow: View {
             if let p = info?.contextPercent { out.append(String(format: String(localized: "Context %lld%% full"), p)) }
             return out.joined(separator: ", ")
         }
+    }
+}
+
+/// A session run outside Midam, dimmed beside the agents: its topic, when it was last written
+/// to, and the terminal glyph. A click opens it for reading (Store.openExternal).
+private struct ExternalRow: View {
+    let session: RecentSession
+    let click: () -> Void
+
+    private var topic: String {
+        session.topic.isEmpty ? String(format: String(localized: "Claude · %@"), session.projectName) : session.topic
+    }
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: topic).lineLimit(1)
+                Text(verbatim: Words.ago(session.lastActive)).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+            }
+        } icon: {
+            Image(systemName: "terminal")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .help(Text("Terminal"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: [topic, String(localized: "Terminal"), Words.ago(session.lastActive)].joined(separator: ", ")))
+        .accessibilityAction(.default, click)
     }
 }
 

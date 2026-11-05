@@ -164,6 +164,13 @@ struct ChatView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 14)
                     .frame(maxWidth: .infinity)
+            } else {
+                ExternalBar(tab: tab, store: store, muted: muted)
+                    .frame(maxWidth: 720)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
+                    .frame(maxWidth: .infinity)
             }
         }
         // Links in replies and errors follow the documents' rules: web pages in the browser,
@@ -509,6 +516,50 @@ private struct SolidCard: ViewModifier {
 
 /// The message field in a glass capsule: Return (or ⌘Return) sends, Shift-Return starts a new line;
 /// Send turns into Stop while a turn runs. Sending during a turn queues the message.
+/// In the composer's place on a session run outside Midam: where it ran, and Continue Here
+/// (Store.adopt), which waits while the terminal still writes to it.
+private struct ExternalBar: View {
+    @ObservedObject var tab: AgentTab
+    let store: Store
+    let muted: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "terminal").foregroundStyle(muted).accessibilityHidden(true)
+            Text("This conversation ran outside Midam").font(.system(size: 13)).foregroundStyle(muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if tab.runningElsewhere {
+                HStack(spacing: 5) {
+                    Circle().fill(.green).frame(width: 7, height: 7).accessibilityHidden(true)
+                    Text("Running elsewhere")
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.primary.opacity(0.07), in: Capsule())
+                .fixedSize()
+                .accessibilityElement(children: .combine)
+            }
+            Button("Continue Here") { if let s = tab.external { store.adopt(s) } }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(tab.runningElsewhere)
+                .help(tab.runningElsewhere ? Text("Finish it in the terminal first") : Text(verbatim: ""))
+                .accessibilityHint(tab.runningElsewhere ? Text("Finish it in the terminal first") : Text(verbatim: ""))
+                .fixedSize()
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 7)
+        .padding(.vertical, 7)
+        .modifier(Glass(shape: RoundedRectangle(cornerRadius: 20, style: .continuous)))
+        .accessibilityElement(children: .contain)
+        .onChange(of: tab.runningElsewhere) { _, running in
+            if running { AccessibilityNotification.Announcement(String(localized: "Running elsewhere")).post() }
+        }
+    }
+}
+
 private struct Composer: View {
     @ObservedObject var tab: AgentTab
     let store: Store
