@@ -27,6 +27,9 @@ struct TerminalStyle: Equatable {
 
     /// SwiftTerm's CursorStyle tag name: blinkBlock, steadyBar, blinkUnderline…
     var cursorTag: String { (blink ? "blink" : "steady") + cursor.rawValue.capitalized }
+
+    /// The space SwiftUI adds between lines for this line spacing, given the font's line height.
+    func extraLeading(lineHeight: Double) -> Double { lineHeight * (spacing - 1) }
 }
 
 /// The terminal's colour themes: Follow Appearance keeps the system text colours (light or dark

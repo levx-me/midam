@@ -78,11 +78,8 @@ struct ReplyTab: View {
     private var preview: some View {
         DisclosureGroup(isExpanded: $previewOpen) {
             Text(verbatim: page.replyMarkdown)
-                .font(.system(size: 11, design: .monospaced))
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .terminalText()
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color(nsColor: .hairline), lineWidth: 1))
         } label: {
             Text("Preview").font(.system(size: 12, weight: .medium))

@@ -306,12 +306,8 @@ private struct ChatRow: View {
                 .accessibilityHint(Text("Shows what it did"))
                 if open {
                     Text(verbatim: detail)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(ink)
                         .textSelection(.enabled)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .textBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                        .terminalText()
                 }
             }
         case .permission(let sentence, let tool, let input, let answer):
@@ -430,9 +426,8 @@ private struct PermissionCard: View {
             Text(LocalizedStringKey(sentence)).font(.system(size: 13))
             DisclosureGroup("Details") {
                 Text(verbatim: tool + "\n" + input)
-                    .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .terminalText()
             }
             .font(.system(size: 12))
             HStack {
@@ -484,10 +479,7 @@ private struct QuestionCard: View {
                             .font(.system(size: 13))
                         if let preview = q.options.first(where: { chosen[i, default: []].contains($0.label) })?.preview {
                             Text(verbatim: preview)
-                                .font(.system(size: 11, design: .monospaced))
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                                .terminalText()
                                 .accessibilityLabel(Text("Preview"))
                         }
                     }

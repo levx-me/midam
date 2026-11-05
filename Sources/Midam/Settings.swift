@@ -1184,6 +1184,32 @@ struct TerminalSettings: View {
     }
 }
 
+/// A chat block that shows terminal text (a tool's output, a permission's details, a preview):
+/// the Terminal settings' font, size, line spacing and theme colours, live. Follow Appearance
+/// keeps the system text colours, which follow light and dark.
+struct TerminalText: ViewModifier {
+    @AppStorage(Pref.terminalFont) private var family = ""
+    @AppStorage(Pref.terminalSize) private var size = Knob.terminalSize.initial
+    @AppStorage(Pref.terminalSpacing) private var spacing = Knob.terminalSpacing.initial
+    @AppStorage(Pref.terminalTheme) private var theme = TerminalTheme.system.rawValue
+
+    func body(content: Content) -> some View {
+        let style = TerminalStyle(family: family, size: size, spacing: spacing, theme: theme)
+        let font = AgentTerminal.font(style)
+        content
+            .font(Font(font))
+            .lineSpacing(style.extraLeading(lineHeight: font.ascender - font.descender + font.leading))
+            .foregroundStyle(Color(nsColor: style.theme.foreground))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(Color(nsColor: style.theme.background), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+extension View {
+    func terminalText() -> some View { modifier(TerminalText()) }
+}
+
 /// A few lines of shell output in the chosen font, spacing, colours and cursor, laid out in
 /// cells the way SwiftTerm measures them. The cursor blinks unless Reduce Motion is on.
 struct TerminalPreview: View {

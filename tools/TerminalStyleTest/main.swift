@@ -11,6 +11,8 @@ assert(TerminalStyle(cursor: "beam").cursor == .block)                      // u
 assert(TerminalStyle(theme: "nope").theme == .system)
 assert(TerminalStyle(size: 2).size == 9 && TerminalStyle(size: 99).size == 24)
 assert(TerminalStyle(spacing: 0.5).spacing == 1 && TerminalStyle(spacing: 3).spacing == 1.6)
+assert(d.extraLeading(lineHeight: 16) == 0)                                 // 1.0: no extra space
+assert(abs(TerminalStyle(spacing: 1.5).extraLeading(lineHeight: 16) - 8) < 1e-9)
 
 func lum(_ c: UInt32) -> Double {
     let ch = [c >> 16 & 0xff, c >> 8 & 0xff, c & 0xff].map { v -> Double in
