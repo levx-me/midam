@@ -6,7 +6,7 @@ import Foundation
 /// Every value crossing it is Codable. Projects are opaque ids (locally, the folder's path).
 @MainActor
 protocol AgentHost: AnyObject {
-    /// A new session in `project`, or `resume` an earlier one (its history arrives as events).
+    /// A new session in `project`, or `resume` an earlier one (its history is in `items` on return).
     /// Nothing runs until the first send. Returns the session id.
     func open(project: String, resume: String?) async throws -> String
     func close(_ session: String) async throws
@@ -88,8 +88,11 @@ final class LocalAgentHost: AgentHost {
         }
         let c = Conversation(project: URL(fileURLWithPath: project), resumeID: resume)
         c.modelOverride = model
+        await c.loadHistory() // one batch: the caller takes it from items(), not as an event per item
         let id = c.sessionID
+        if sessions[id] != nil { return id } // opened meanwhile
         sessions[id] = (c, project)
+        sent[id] = (c.items, try info(of: id))
         c.changed = { [weak self] in self?.emit(id) }
         if let library, !library.conversations(in: project).contains(where: { $0.sessionID == id }) {
             library.addConversation(AgentConversation(sessionID: id, root: project))

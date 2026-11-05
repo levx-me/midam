@@ -58,6 +58,14 @@ struct ChatView: View {
     @ObservedObject var store: Store
     let ink: Color, muted: Color
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The transcript's end in the scroll view's space, and the scroll view's height: the reader is
+    /// at the bottom while the end is in view.
+    @State private var endY: CGFloat = 0
+    @State private var viewport: CGFloat = 0
+    /// Something new arrived while the reader was scrolled up: the "New messages" pill.
+    @State private var unread = false
+    nonisolated private static let space = "chat"
+    private var atBottom: Bool { endY <= viewport + 24 }
 
     var body: some View {
         // The composer sits below the transcript, never over it: a card's buttons are always reachable.
@@ -76,6 +84,7 @@ struct ChatView: View {
                                     last: item.id == tab.items.last(where: { if case .error = $0.kind { true } else { false } })?.id)
                         }
                         Color.clear.frame(height: 1).id("end")
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { endY = $0 }
                     }
                     .frame(maxWidth: 720)
                     .padding(.horizontal, 24)
@@ -83,9 +92,26 @@ struct ChatView: View {
                     .padding(.bottom, 16)
                     .frame(maxWidth: .infinity)
                 }
+                .coordinateSpace(.named(Self.space))
                 .defaultScrollAnchor(.bottom)
-                .onChange(of: tab.items.last) { toEnd(proxy) }
-                .onChange(of: tab.waiting) { toEnd(proxy) } // a card, and the composer's "Waiting for you" line
+                // History arrives in one batch: a fresh scroll view for it opens at the bottom
+                // (the default anchor) once, instead of scrolling through what loaded.
+                .id(tab.items.isEmpty)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+                .onChange(of: tab.items.last) { old, new in follow(old, new, proxy) }
+                .onChange(of: tab.waiting) { if tab.waiting || atBottom { toEnd(proxy) } } // a card, and the composer's "Waiting for you" line
+                .onChange(of: atBottom) { if atBottom { unread = false } }
+                .overlay(alignment: .bottom) {
+                    if unread {
+                        Button { toEnd(proxy) } label: {
+                            HStack(spacing: 4) { Text("New messages"); Image(systemName: "arrow.down") }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .padding(.bottom, 10)
+                    }
+                }
             }
             Composer(tab: tab, store: store, muted: muted)
                 .frame(maxWidth: 720)
@@ -109,9 +135,23 @@ struct ChatView: View {
         .accessibilityLabel(Text(verbatim: tab.title))
     }
 
+    /// The last item changed: follow it when the reader was at the bottom (measured before this
+    /// change) or just sent it; otherwise a new item lights the pill. The first batch needs
+    /// nothing: its scroll view opens at the bottom.
+    private func follow(_ old: ChatItem?, _ new: ChatItem?, _ proxy: ScrollViewProxy) {
+        guard let old, let new else { return }
+        let added = old.id != new.id
+        if atBottom || (added && { if case .user = new.kind { true } else { false } }()) {
+            proxy.scrollTo("end", anchor: .bottom) // in this update, so the end never leaves the view
+        } else if added {
+            unread = true
+        }
+    }
+
     /// To the transcript's end; again once the new rows are laid out, since the lazy stack only
     /// estimates their height on the first pass.
     private func toEnd(_ proxy: ScrollViewProxy) {
+        unread = false
         let go = { proxy.scrollTo("end", anchor: .bottom) }
         if reduceMotion { go() } else { withAnimation(.easeOut(duration: 0.2), go) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { go() }

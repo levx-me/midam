@@ -34,13 +34,12 @@ final class Conversation: ObservableObject {
     private var turn = false
     private var stderrTail: [String] = []
 
-    /// A new conversation, or (with `resumeID`) an earlier session whose history is loaded at once;
-    /// nothing runs until the first send.
+    /// A new conversation, or (with `resumeID`) an earlier session whose history `loadHistory`
+    /// brings in; nothing runs until the first send.
     init(project: URL, resumeID: String? = nil) {
         self.project = project
         resume = resumeID != nil
         sessionID = resumeID.flatMap(Self.sessionID) ?? UUID().uuidString.lowercased()
-        if resume { loadHistory() }
     }
 
     func start() {
@@ -170,7 +169,7 @@ final class Conversation: ObservableObject {
         publish()
     }
 
-    private func publish() {
+    private func publish(notify: Bool = true) {
         items = parse.items
         model = parse.model
         contextPercent = parse.contextPercent
@@ -178,7 +177,7 @@ final class Conversation: ObservableObject {
         topic = parse.topic
         if let id = parse.sessionID { sessionID = id }
         if process != nil { state = !parse.pending.isEmpty ? .blocked : turn ? .working : .idle }
-        changed?()
+        if notify { changed?() }
     }
 
     // MARK: - Input
@@ -195,19 +194,19 @@ final class Conversation: ObservableObject {
 
     // MARK: - History
 
-    private func loadHistory() {
-        guard let url = Self.transcript(project: project, id: sessionID) else { return }
-        Task.detached(priority: .userInitiated) { [weak self] in
+    /// The earlier session's history, as one batch before anything is shown (no change events:
+    /// the host hands the items over at once).
+    func loadHistory() async {
+        guard resume, items.isEmpty, let url = Self.transcript(project: project, id: sessionID) else { return }
+        let history = await Task.detached(priority: .userInitiated) {
             var p = ChatParse()
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             for line in text.split(separator: "\n") { p.transcript(String(line)) }
-            let history = p
-            await MainActor.run { [weak self] in
-                guard let self, self.items.isEmpty else { return }
-                self.parse = history
-                self.publish()
-            }
-        }
+            return p
+        }.value
+        guard items.isEmpty else { return }
+        parse = history
+        publish(notify: false)
     }
 
     /// `~/.claude/projects/<cwd with every non-alphanumeric as "-">/<id>.jsonl`, else any project
