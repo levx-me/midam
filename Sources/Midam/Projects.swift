@@ -51,6 +51,37 @@ struct RecentSession: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// The New Agent picker's rules (tools/AgentPickerTest).
+enum AgentPickerRules {
+    /// `path` with the home folder written as ~.
+    static func friendly(_ path: String, home: String = NSHomeDirectory()) -> String {
+        let home = home.count > 1 && home.hasSuffix("/") ? String(home.dropLast()) : home
+        if path == home { return "~" }
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// The folder `path` lives in, friendly.
+    static func parent(_ path: String, home: String = NSHomeDirectory()) -> String {
+        friendly((path as NSString).deletingLastPathComponent, home: home)
+    }
+
+    /// The selection once the shown rows change: kept while shown, else the first row (nil when none).
+    static func keep(_ selected: String?, in shown: [String]) -> String? {
+        if let selected, shown.contains(selected) { return selected }
+        return shown.first
+    }
+
+    /// The sessions in `root`, newest first.
+    static func sessions(in root: String, _ all: [RecentSession]) -> [RecentSession] {
+        all.filter { $0.projectRoot == root }.sorted { $0.lastActive > $1.lastActive }
+    }
+
+    /// Whether counting `root`'s documents by walking it is reasonable (never the home folder or /).
+    static func countable(_ root: String, home: String = NSHomeDirectory()) -> Bool {
+        friendly(root, home: home) != "~" && root != "/"
+    }
+}
+
 enum RecentSessions {
     /// The newest `limit` Claude sessions in `~/.claude/projects/*/*.jsonl`, newest first.
     // ponytail: reads only the first and last 256 KB of each transcript; a title or cwd outside

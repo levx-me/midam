@@ -303,6 +303,10 @@
 "Search conversations" = "Search conversations";
 "No earlier conversations yet." = "No earlier conversations yet.";
 "Nothing matches." = "Nothing matches.";
+"Last active" = "Last active";
+"Conversations" = "Conversations";
+"In a tab" = "In a tab";
+"Select a conversation to see its project." = "Select a conversation to see its project.";
 "Project name" = "Project name";
 "A project with that name already exists." = "A project with that name already exists.";
 "Use a name without / and not starting with a dot." = "Use a name without / and not starting with a dot.";

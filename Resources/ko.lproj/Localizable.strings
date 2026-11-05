@@ -305,6 +305,10 @@
 "Search conversations" = "대화 검색";
 "No earlier conversations yet." = "아직 지난 대화가 없어요.";
 "Nothing matches." = "맞는 대화가 없어요.";
+"Last active" = "마지막 활동";
+"Conversations" = "대화";
+"In a tab" = "탭에 열림";
+"Select a conversation to see its project." = "대화를 고르면 그 프로젝트가 여기 보여요.";
 "Project name" = "프로젝트 이름";
 "A project with that name already exists." = "같은 이름의 프로젝트가 이미 있어요.";
 "Use a name without / and not starting with a dot." = "/가 없고 마침표로 시작하지 않는 이름을 써 주세요.";

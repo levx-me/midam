@@ -943,7 +943,7 @@ struct ReaderView: View {
                 .animation(reduceMotion ? nil : .smooth, value: store.immersive)
         }
         .overlay { TipLayer() }
-        .sheet(isPresented: $store.newAgentOpen) { NewAgentSheet(store: store) }
+        .sheet(isPresented: $store.newAgentOpen) { AgentPicker(store: store) }
         .coordinateSpace(.named(Tips.space))
         // The page runs to the top of the window and scrolls under the floating capsules;
         // render.js pads its first line below them.
