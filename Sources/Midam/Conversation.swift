@@ -216,6 +216,7 @@ final class Conversation: ObservableObject {
             return (page, lines)
         }.value
         loadingPage = false
+        if rest.failed { return [] } // keep the position: a retry reads the same page again
         history = rest
         parse.prepend(page)
         publish(notify: false)
@@ -226,7 +227,7 @@ final class Conversation: ObservableObject {
     /// (fewer at the transcript's start), parsed oldest first into `seed`, which brings the tool
     /// results already seen later in the file.
     nonisolated static func page(_ lines: inout TranscriptLines, size: Int, into seed: ChatParse) -> ChatParse {
-        guard let file = try? FileHandle(forReadingFrom: lines.url) else { lines.stop(); return seed }
+        guard let file = try? FileHandle(forReadingFrom: lines.url) else { lines.failed = true; return seed }
         defer { try? file.close() }
         var picked: [String] = [], n = 0
         while n < size, let line = lines.previous(file) {
@@ -362,6 +363,8 @@ struct TranscriptLines: Sendable {
     private var offset: UInt64
     private var tail = Data()
     var atStart: Bool { offset == 0 && tail.isEmpty }
+    /// The last read failed (the file went away or shrank); the caller keeps its earlier copy to retry.
+    var failed = false
 
     init(url: URL, chunk: Int = 1 << 18) {
         self.url = url
@@ -385,14 +388,11 @@ struct TranscriptLines: Sendable {
             }
             let n = min(UInt64(chunk), offset)
             guard (try? file.seek(toOffset: offset - n)) != nil, let d = try? file.read(upToCount: Int(n)), d.count == Int(n) else {
-                stop()
+                failed = true
                 return nil
             }
             offset -= n
             tail = d + tail
         }
     }
-
-    /// Nothing more to read (the file went away or shrank).
-    mutating func stop() { offset = 0; tail = Data() }
 }

@@ -323,6 +323,8 @@
 "Waiting to send" = "Waiting to send";
 "New messages" = "New messages";
 "Loading earlier messages" = "Loading earlier messages";
+"Couldn't load earlier messages" = "Couldn't load earlier messages";
+"Retry" = "Retry";
 "Working…" = "Working…";
 "You: " = "You: ";
 "Writing a document…" = "Writing a document…";

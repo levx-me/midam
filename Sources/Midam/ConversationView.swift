@@ -74,6 +74,8 @@ struct ChatView: View {
     @State private var unread = false
     /// The first row's frame in the scroll view, and the row to hold in place when a page lands.
     @State private var first: (id: String, frame: CGRect)?
+    /// The last page failed to load: "Couldn't load earlier messages · Retry" instead of the spinner.
+    @State private var earlierFailed = false
     @State private var hold: (id: String, anchor: UnitPoint)?
     nonisolated private static let space = "chat"
     private var atBottom: Bool { endY <= viewport + 24 }
@@ -92,9 +94,18 @@ struct ChatView: View {
                         }
                         // Near the top with history left: load the page before (again while still in view).
                         if tab.info?.earlier == true {
-                            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
-                                .accessibilityLabel(Text("Loading earlier messages"))
-                                .task(id: tab.items.first?.id) { await loadEarlier() }
+                            if earlierFailed {
+                                HStack(spacing: 4) {
+                                    Text("Couldn't load earlier messages").foregroundStyle(.secondary)
+                                    Text(verbatim: "·").foregroundStyle(.secondary)
+                                    Button("Retry") { earlierFailed = false }.buttonStyle(.link)
+                                }
+                                .font(.system(size: 12)).frame(maxWidth: .infinity)
+                            } else {
+                                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                                    .accessibilityLabel(Text("Loading earlier messages"))
+                                    .task(id: tab.items.first?.id) { await loadEarlier() }
+                            }
                         }
                         ForEach(tab.items) { item in
                             ChatRow(item: item, tab: tab, store: store, ink: ink, muted: muted,
@@ -176,9 +187,10 @@ struct ChatView: View {
     private func loadEarlier() async {
         guard let session = tab.session, !tab.loadingEarlier else { return }
         tab.loadingEarlier = true
-        let older = (try? await store.host.earlier(session)) ?? []
+        let older = try? await store.host.earlier(session)
         let info = try? await store.host.info(session)
         tab.loadingEarlier = false
+        guard let older, !(older.isEmpty && info?.earlier != false) else { earlierFailed = true; return }
         if let top = tab.items.first, !older.isEmpty {
             if let f = first, f.id == top.id, abs(viewport - f.frame.height) > 1 {
                 hold = (top.id, UnitPoint(x: 0, y: f.frame.minY / (viewport - f.frame.height)))

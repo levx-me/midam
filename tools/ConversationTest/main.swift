@@ -449,6 +449,17 @@ do {
     // A transcript that is gone reads as empty, and a small one in one page.
     var gone = TranscriptLines(url: base.appendingPathComponent("missing.jsonl"))
     check(gone.atStart && Conversation.page(&gone, size: 50, into: ChatParse()).items.isEmpty, "missing transcript: nothing, at start")
+    // A transcript that goes away between pages is a failure, not the start: the position is kept
+    // (the caller keeps its copy), and a retry reads the same page once the file is back.
+    let flaky = base.appendingPathComponent("flaky.jsonl")
+    try! (lines.joined(separator: "\n") + "\n").write(to: flaky, atomically: true, encoding: .utf8)
+    let before = TranscriptLines(url: flaky)
+    try! FileManager.default.removeItem(at: flaky)
+    var failing = before
+    check(Conversation.page(&failing, size: 50, into: ChatParse()).items.isEmpty && failing.failed && !before.atStart, "unreadable transcript: failed, history kept")
+    try! (lines.joined(separator: "\n") + "\n").write(to: flaky, atomically: true, encoding: .utf8)
+    var retry = before
+    check(!Conversation.page(&retry, size: 50, into: ChatParse()).items.isEmpty && !retry.failed, "retry reads the page once the file is back")
     var small = TranscriptLines(url: here.appendingPathComponent("fixtures/transcript.jsonl"), chunk: 100)
     let one = Conversation.page(&small, size: 50, into: ChatParse())
     check(small.atStart && kinds(one) == ["user", "tool:AskUserQuestion", "tool:Bash", "tool:Write", "assistant"], "fixture in one page: \(kinds(one))")
