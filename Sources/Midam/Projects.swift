@@ -141,6 +141,13 @@ enum RecentSessions {
                 if let t = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty, !t.hasPrefix("<") { prompt = t }
             }
         }
+        // The latest cwd wins: a session that moved folders (a renamed repo, a `cd`) belongs where it is now.
+        // ponytail: resuming such a session from its new folder may not find it (Claude keys sessions
+        // by the starting folder); handle when "Continue Here" on a moved session is reported broken.
+        for line in text.split(separator: "\n").reversed() where line.contains("\"cwd\":") {
+            if let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+               let c = o["cwd"] as? String { cwd = c; break }
+        }
         let topic = (title ?? prompt ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         return (cwd, String(topic.prefix(120)))
     }

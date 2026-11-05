@@ -333,4 +333,7 @@ do { _ = try Projects.create(name: "demo", home: h2); assertionFailure("exists")
 let conv = AgentConversation(root: made.path)
 assert(try! JSONDecoder().decode(AgentConversation.self, from: JSONEncoder().encode(conv)) == conv)
 
+// A session that moved folders belongs to the latest cwd.
+assert(RecentSessions.parse(["{\"type\":\"user\",\"cwd\":\"/w/old\",\"message\":{\"content\":\"Hi\"}}", "{\"type\":\"user\",\"cwd\":\"/w/new\",\"message\":{\"content\":\"Again\"}}"].joined(separator: "\n")) == ("/w/new", "Hi"))
+
 print("library rules: checks passed")
