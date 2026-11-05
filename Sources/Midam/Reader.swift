@@ -742,7 +742,7 @@ import UserNotifications
             MainActor.assumeIsolated {
                 self?.hintKeys(event)
                 guard event.type == .keyDown, let self else { return false }
-                return self.tabBracket(event) || self.singleKeyBypass(event)
+                return self.windowKeys(event) || self.singleKeyBypass(event)
             } ? nil : event
         }
         // Hints go when the app or the window stops being the one typed into.
@@ -754,12 +754,17 @@ import UserNotifications
         return w
     }
 
-    /// ⇧⌘[ / ⇧⌘]: previous / next tab, as in Safari and Finder, wherever focus is in the main window
+    /// ⌃⌘F: full screen. ⇧⌘[ / ⇧⌘]: previous / next tab, as in Safari and Finder, wherever focus is in the main window
     /// (chat, terminal, sidebar; the menu shows ⌃⇧Tab / ⌃Tab). By character: Shift gives { and } on
     /// US and Korean 2-set; [ and ] cover a layout whose shifted bracket key types the bracket.
-    private func tabBracket(_ event: NSEvent) -> Bool {
+    private func windowKeys(_ event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
-        guard mods == [.command, .shift], event.window === window else { return false }
+        guard event.window === window else { return false }
+        // ⌃⌘F: the system binds full screen to fn/🌐-F only.
+        if mods == [.control, .command], event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" { // 3 = kVK_ANSI_F
+            window?.toggleFullScreen(nil); return true
+        }
+        guard mods == [.command, .shift] else { return false }
         let c = event.charactersIgnoringModifiers ?? ""
         if c == "{" || c == "[" { Store.shared.step(-1); return true }
         if c == "}" || c == "]" { Store.shared.step(1); return true }

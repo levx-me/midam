@@ -87,6 +87,9 @@ struct ChatView: View {
     /// The last page failed to load: "Couldn't load earlier messages · Retry" instead of the spinner.
     @State private var earlierFailed = false
     @State private var hold: (id: String, anchor: UnitPoint)?
+    /// The pill was clicked and the end is not in view yet: new rows and streamed text follow as
+    /// if the reader were at the bottom.
+    @State private var chasing = false
     nonisolated private static let space = "chat"
     private var atBottom: Bool { endY <= viewport + 24 }
 
@@ -194,7 +197,7 @@ struct ChatView: View {
     private func follow(_ old: ChatItem?, _ new: ChatItem?, _ proxy: ScrollViewProxy) {
         guard let old, let new else { return }
         let added = old.id != new.id
-        if atBottom || (added && { if case .user = new.kind { true } else { false } }()) {
+        if atBottom || chasing || (added && { if case .user = new.kind { true } else { false } }()) {
             proxy.scrollTo("end", anchor: .bottom) // in this update, so the end never leaves the view
         } else if added {
             unread = true
@@ -224,11 +227,22 @@ struct ChatView: View {
 
     /// To the transcript's end; again once the new rows are laid out, since the lazy stack only
     /// estimates their height on the first pass.
+    /// One scrollTo lands short of the end when the reader is far up: the lazy stack lays out the
+    /// rows on the way only as they come into view, and they outgrow its estimates. So it scrolls
+    /// again until the end is in view (a few tries), following anything that streams in meanwhile.
     private func toEnd(_ proxy: ScrollViewProxy) {
         unread = false
+        chasing = true
         let go = { proxy.scrollTo("end", anchor: .bottom) }
         if reduceMotion { go() } else { withAnimation(.easeOut(duration: 0.2), go) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { go() }
+        func settle(_ tries: Int, after delay: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard tries > 0, !atBottom else { chasing = false; return }
+                go()
+                settle(tries - 1, after: 0.05)
+            }
+        }
+        settle(10, after: 0.25)
     }
 }
 

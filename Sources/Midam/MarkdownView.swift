@@ -494,13 +494,8 @@ final class PageWebView: WKWebView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // ⌃⌘F: the system binds full screen to fn/🌐-F only, and WKWebView would swallow ⌃⌘F.
+        // ⌃⌘F (full screen) and ⇧⌘[ ] are taken app-wide by the window's key monitor (Reader.swift, windowKeys).
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
-        if event.type == .keyDown, mods == [.control, .command],
-           event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f" { // 3 = kVK_ANSI_F
-            window?.toggleFullScreen(nil)
-            return true
-        }
         // ⌘[ / ⌘]: back / forward (WKWebView would take them), by character, so another layout's
         // key in that position does not go back. Layouts that type [ with Option reach the menu below.
         if event.type == .keyDown, mods == [.command] {
@@ -508,7 +503,6 @@ final class PageWebView: WKWebView {
             if c == "[" { Store.shared.goBack(); return true }
             if c == "]" { Store.shared.goForward(); return true }
         }
-        // ⇧⌘[ / ⇧⌘] are taken app-wide by the window's key monitor (Reader.swift, tabBracket).
         return NSApp.mainMenu?.performKeyEquivalent(with: event) == true || super.performKeyEquivalent(with: event)
     }
 
