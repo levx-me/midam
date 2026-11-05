@@ -25,6 +25,8 @@ import SwiftUI
     /// Something new while another tab was in front (a finished turn, a preview opened in the
     /// background): "done" or a dot until the tab is shown.
     @Published var unseen = false
+    /// A history page is on its way (AgentHost.earlier).
+    var loadingEarlier = false
 
     init(session: String?, project: String, group: String? = nil, terminal: AgentTerminal? = nil, preview: PreviewPage? = nil) {
         self.session = session
@@ -49,6 +51,12 @@ import SwiftUI
     func upsert(_ item: ChatItem) {
         if let i = items.firstIndex(where: { $0.id == item.id }) { items[i] = item } else { items.append(item) }
     }
+
+    /// A history page, in front of the items (any already here are skipped).
+    func prepend(_ older: [ChatItem]) {
+        let have = Set(items.map(\.id))
+        items.insert(contentsOf: older.filter { !have.contains($0.id) }, at: 0)
+    }
 }
 
 // MARK: - Conversation
@@ -64,6 +72,9 @@ struct ChatView: View {
     @State private var viewport: CGFloat = 0
     /// Something new arrived while the reader was scrolled up: the "New messages" pill.
     @State private var unread = false
+    /// The first row's frame in the scroll view, and the row to hold in place when a page lands.
+    @State private var first: (id: String, frame: CGRect)?
+    @State private var hold: (id: String, anchor: UnitPoint)?
     nonisolated private static let space = "chat"
     private var atBottom: Bool { endY <= viewport + 24 }
 
@@ -79,9 +90,18 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 40)
                         }
+                        // Near the top with history left: load the page before (again while still in view).
+                        if tab.info?.earlier == true {
+                            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                                .accessibilityLabel(Text("Loading earlier messages"))
+                                .task(id: tab.items.first?.id) { await loadEarlier() }
+                        }
                         ForEach(tab.items) { item in
                             ChatRow(item: item, tab: tab, store: store, ink: ink, muted: muted,
                                     last: item.id == tab.items.last(where: { if case .error = $0.kind { true } else { false } })?.id)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in
+                                    if item.id == tab.items.first?.id { first = (item.id, frame) }
+                                }
                         }
                         Color.clear.frame(height: 1).id("end")
                             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { endY = $0 }
@@ -101,6 +121,9 @@ struct ChatView: View {
                 .onChange(of: tab.items.last) { old, new in follow(old, new, proxy) }
                 .onChange(of: tab.waiting) { if tab.waiting || atBottom { toEnd(proxy) } } // a card, and the composer's "Waiting for you" line
                 .onChange(of: atBottom) { if atBottom { unread = false } }
+                .onChange(of: tab.items.first?.id) { // a page landed above: same row, same place
+                    if let h = hold { hold = nil; proxy.scrollTo(h.id, anchor: h.anchor) }
+                }
                 .overlay(alignment: .bottom) {
                     if unread {
                         Button { toEnd(proxy) } label: {
@@ -146,6 +169,26 @@ struct ChatView: View {
         } else if added {
             unread = true
         }
+    }
+
+    /// The history page before the first row. The row that was first stays where it is on screen:
+    /// scrolling to it with the anchor at the same fraction of row and view (minY + a·h = a·H).
+    private func loadEarlier() async {
+        guard let session = tab.session, !tab.loadingEarlier else { return }
+        tab.loadingEarlier = true
+        let older = (try? await store.host.earlier(session)) ?? []
+        let info = try? await store.host.info(session)
+        tab.loadingEarlier = false
+        if let top = tab.items.first, !older.isEmpty {
+            if let f = first, f.id == top.id, abs(viewport - f.frame.height) > 1 {
+                hold = (top.id, UnitPoint(x: 0, y: f.frame.minY / (viewport - f.frame.height)))
+            } else {
+                hold = (top.id, .top)
+            }
+        }
+        tab.prepend(older)
+        if tab.items.first?.id == hold?.id { hold = nil } // nothing new above
+        if let info { tab.info = info }
     }
 
     /// To the transcript's end; again once the new rows are laid out, since the lazy stack only

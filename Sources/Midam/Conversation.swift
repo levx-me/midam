@@ -33,13 +33,21 @@ final class Conversation: ObservableObject {
     private var queue: [(id: String, text: String)] = []
     private var turn = false
     private var stderrTail: [String] = []
+    /// The earlier session's transcript, read backwards a page at a time; nil for a new conversation.
+    private var history: TranscriptLines?
+    private var loadingPage = false
+    /// History before the items is still to load.
+    var hasEarlier: Bool { history.map { !$0.atStart } ?? false }
+    /// Items per history page.
+    nonisolated static let pageSize = 50
 
-    /// A new conversation, or (with `resumeID`) an earlier session whose history `loadHistory`
-    /// brings in; nothing runs until the first send.
+    /// A new conversation, or (with `resumeID`) an earlier session whose history `loadEarlier`
+    /// brings in a page at a time; nothing runs until the first send.
     init(project: URL, resumeID: String? = nil) {
         self.project = project
         resume = resumeID != nil
         sessionID = resumeID.flatMap(Self.sessionID) ?? UUID().uuidString.lowercased()
+        if resume, let url = Self.transcript(project: project, id: sessionID) { history = TranscriptLines(url: url) }
     }
 
     func start() {
@@ -194,19 +202,54 @@ final class Conversation: ObservableObject {
 
     // MARK: - History
 
-    /// The earlier session's history, as one batch before anything is shown (no change events:
-    /// the host hands the items over at once).
-    func loadHistory() async {
-        guard resume, items.isEmpty, let url = Self.transcript(project: project, id: sessionID) else { return }
-        let history = await Task.detached(priority: .userInitiated) {
-            var p = ChatParse()
-            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-            for line in text.split(separator: "\n") { p.transcript(String(line)) }
-            return p
+    /// The history page before the items (the newest page first), put in front of them as one
+    /// batch with no change events: the host hands it over. Empty at the start or while a page loads.
+    func loadEarlier() async -> [ChatItem] {
+        guard !loadingPage, let lines = history, !lines.atStart else { return [] }
+        loadingPage = true
+        let (results, first) = (parse.laterResults, parse.items.isEmpty)
+        let (page, rest) = await Task.detached(priority: .userInitiated) {
+            var lines = lines, seed = ChatParse()
+            seed.laterResults = results
+            if first { seed.topic = Self.headTopic(lines.url) }
+            let page = Self.page(&lines, size: Self.pageSize, into: seed)
+            return (page, lines)
         }.value
-        guard items.isEmpty else { return }
-        parse = history
+        loadingPage = false
+        history = rest
+        parse.prepend(page)
         publish(notify: false)
+        return page.items
+    }
+
+    /// The page before what `lines` returned so far: lines going back until they hold `size` items
+    /// (fewer at the transcript's start), parsed oldest first into `seed`, which brings the tool
+    /// results already seen later in the file.
+    nonisolated static func page(_ lines: inout TranscriptLines, size: Int, into seed: ChatParse) -> ChatParse {
+        guard let file = try? FileHandle(forReadingFrom: lines.url) else { lines.stop(); return seed }
+        defer { try? file.close() }
+        var picked: [String] = [], n = 0
+        while n < size, let line = lines.previous(file) {
+            var one = ChatParse() // ponytail: each line is parsed twice, once to count its items
+            one.transcript(line)
+            n += one.items.count
+            picked.append(line)
+        }
+        var p = seed
+        for line in picked.reversed() { p.transcript(line) }
+        return p
+    }
+
+    /// The topic the transcript's first 256 KB give (an ai-title, else the first prompt): the
+    /// newest page alone may hold neither.
+    nonisolated static func headTopic(_ url: URL) -> String? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        var p = ChatParse()
+        for line in ((try? file.read(upToCount: 1 << 18)) ?? Data()).split(separator: 10) {
+            p.transcript(String(decoding: line, as: UTF8.self))
+        }
+        return p.topic
     }
 
     /// `~/.claude/projects/<cwd with every non-alphanumeric as "-">/<id>.jsonl`, else any project
@@ -308,4 +351,48 @@ final class Conversation: ObservableObject {
             DispatchQueue.main.async { MainActor.assumeIsolated { ended(status) } }
         }
     }
+}
+
+/// A transcript's lines from the end backwards, read `chunk` bytes at a time, so a page of history
+/// never reads the whole file. Bytes split at newlines only: a multi-byte character stays whole.
+struct TranscriptLines: Sendable {
+    let url: URL
+    let chunk: Int
+    /// Bytes before `offset` are unread; `tail` holds the read bytes not returned yet.
+    private var offset: UInt64
+    private var tail = Data()
+    var atStart: Bool { offset == 0 && tail.isEmpty }
+
+    init(url: URL, chunk: Int = 1 << 18) {
+        self.url = url
+        self.chunk = max(1, chunk)
+        offset = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// The line before those returned so far (empty lines skipped); nil at the file's start.
+    // ponytail: a line longer than a chunk is re-copied per chunk; fine for multi-MB tool output.
+    mutating func previous(_ file: FileHandle) -> String? {
+        while true {
+            if let nl = tail.lastIndex(of: 10) {
+                let line = tail[tail.index(after: nl)...]
+                tail = tail[..<nl]
+                if !line.isEmpty { return String(decoding: line, as: UTF8.self) }
+                continue
+            }
+            if offset == 0 {
+                defer { tail = Data() }
+                return tail.isEmpty ? nil : String(decoding: tail, as: UTF8.self)
+            }
+            let n = min(UInt64(chunk), offset)
+            guard (try? file.seek(toOffset: offset - n)) != nil, let d = try? file.read(upToCount: Int(n)), d.count == Int(n) else {
+                stop()
+                return nil
+            }
+            offset -= n
+            tail = d + tail
+        }
+    }
+
+    /// Nothing more to read (the file went away or shrank).
+    mutating func stop() { offset = 0; tail = Data() }
 }

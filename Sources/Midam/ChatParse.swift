@@ -45,12 +45,15 @@ struct ChatParse {
     private(set) var items: [ChatItem] = []
     private(set) var model: String?
     private(set) var sessionID: String?
-    private(set) var topic: String?
+    /// The ai-title, else the first prompt. History paging seeds it from the transcript's head.
+    var topic: String?
     private(set) var contextTokens = 0
     private(set) var contextWindow: Int?
     /// A `result` line arrived: the turn in flight is over.
     private(set) var turnEnded = false
     private var openTasks = Set<String>()
+    /// History read from the end: tool results whose tool use is on an earlier page, by tool use id.
+    var laterResults: [String: (output: String, failed: Bool)] = [:]
     private var interrupted = false
 
     /// Teammates (Task/Agent tool uses) still running.
@@ -192,6 +195,18 @@ struct ChatParse {
         items.append(ChatItem(id: "error-\(items.count)", kind: .error(text)))
     }
 
+    /// Puts `earlier`, the history page before this one (parsed with this parse's laterResults),
+    /// in front; what this parse has not learned yet (model, topic, …) comes from it.
+    mutating func prepend(_ earlier: ChatParse) {
+        items = earlier.items + items
+        laterResults = earlier.laterResults
+        openTasks.formUnion(earlier.openTasks)
+        model = model ?? earlier.model
+        sessionID = sessionID ?? earlier.sessionID
+        topic = topic ?? earlier.topic
+        if contextTokens == 0 { contextTokens = earlier.contextTokens }
+    }
+
     // MARK: - Messages
 
     private mutating func message(_ m: [String: Any], live: Bool) {
@@ -205,7 +220,9 @@ struct ChatParse {
                 if t > 0 { contextTokens = t }
             }
             let mid = msg["id"] as? String ?? UUID().uuidString
-            for case let b as [String: Any] in msg["content"] as? [Any] ?? [] {
+            // A transcript line's own uuid keeps ids the same however the history is paged.
+            let line = live ? nil : m["uuid"] as? String
+            for case let (n, b as [String: Any]) in (msg["content"] as? [Any] ?? []).enumerated() {
                 switch b["type"] as? String {
                 case "text":
                     let text = b["text"] as? String ?? ""
@@ -213,14 +230,21 @@ struct ChatParse {
                        case .assistant(_, true) = items[i].kind {
                         items[i].kind = .assistant(markdown: text, streaming: false)
                     } else if !text.isEmpty {
-                        items.append(ChatItem(id: "\(mid)#\(items.count)", kind: .assistant(markdown: text, streaming: false)))
+                        let id = line.map { "\(mid)#\($0).\(n)" } ?? "\(mid)#\(items.count)"
+                        items.append(ChatItem(id: id, kind: .assistant(markdown: text, streaming: false)))
                     }
                 case "tool_use":
                     guard let id = b["id"] as? String, let name = b["name"] as? String,
                           !items.contains(where: { $0.id == id }) else { continue }
                     let input = b["input"] as? [String: Any] ?? [:]
                     let f = Self.friendly(name, input)
-                    items.append(ChatItem(id: id, kind: .tool(name: name, line: f.line, subject: f.subject, detail: Self.detail(name, input), status: .running)))
+                    let detail = Self.detail(name, input)
+                    if let r = laterResults.removeValue(forKey: id) { // its result is already on a later page
+                        items.append(ChatItem(id: id, kind: .tool(name: name, line: f.line, subject: f.subject,
+                                                                  detail: Self.detail(detail, r.output), status: r.failed ? .failed : .done)))
+                        continue
+                    }
+                    items.append(ChatItem(id: id, kind: .tool(name: name, line: f.line, subject: f.subject, detail: detail, status: .running)))
                     if name == "Task" || name == "Agent" { openTasks.insert(id) }
                 default: break // thinking
                 }
@@ -240,11 +264,13 @@ struct ChatParse {
             case "tool_result":
                 guard let id = b["tool_use_id"] as? String else { continue }
                 openTasks.remove(id)
+                let out = String(Self.text(b["content"]).prefix(2000)), failed = b["is_error"] as? Bool == true
                 guard let i = items.firstIndex(where: { $0.id == id }),
-                      case .tool(let n, let l, let s, let d, _) = items[i].kind else { continue }
-                let out = Self.text(b["content"])
-                let detail = out.isEmpty ? d : d + "\n\n" + String(out.prefix(2000))
-                items[i].kind = .tool(name: n, line: l, subject: s, detail: detail, status: b["is_error"] as? Bool == true ? .failed : .done)
+                      case .tool(let n, let l, let s, let d, _) = items[i].kind else {
+                    if !live { laterResults[id] = (out, failed) }
+                    continue
+                }
+                items[i].kind = .tool(name: n, line: l, subject: s, detail: Self.detail(d, out), status: failed ? .failed : .done)
             case "text":
                 if (b["text"] as? String ?? "").hasPrefix("[Request interrupted") { interrupted = true }
                 if !live, !sub, let t = Self.prompt(b["text"] as? String ?? "") {
@@ -311,6 +337,11 @@ struct ChatParse {
         if has(["build", " run ", " start", " dev ", " dev\n", "serve", " open ", "make ", "./"]) { return "Running the app…" }
         if has(["cat ", "ls ", "grep ", "find ", "head ", "tail ", " rg "]) { return "Reading…" }
         return "Working…"
+    }
+
+    /// A tool's detail with its result below.
+    private static func detail(_ detail: String, _ output: String) -> String {
+        output.isEmpty ? detail : detail + "\n\n" + output
     }
 
     private static func detail(_ name: String, _ input: [String: Any]) -> String {

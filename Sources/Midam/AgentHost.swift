@@ -17,6 +17,9 @@ protocol AgentHost: AnyObject {
     func answer(_ session: String, question id: String, choices: [String: [String]]) async throws
     func info(_ session: String) async throws -> SessionInfo
     func items(_ session: String) async throws -> [ChatItem]
+    /// The history page before the session's first item, to put in front of it (no events for
+    /// it); empty at the start. `SessionInfo.earlier` says whether there is more.
+    func earlier(_ session: String) async throws -> [ChatItem]
     /// Changes to every open session, from now on.
     func events() -> AsyncStream<HostEvent>
     func documents(project: String) async throws -> [DocumentRef]
@@ -45,6 +48,8 @@ struct SessionInfo: Codable, Equatable, Sendable {
     var contextPercent: Int?
     var subagents: Int
     var topic: String?
+    /// History before the first item is still to load (`AgentHost.earlier`).
+    var earlier = false
 }
 
 enum HostEvent: Codable, Equatable, Sendable {
@@ -88,7 +93,7 @@ final class LocalAgentHost: AgentHost {
         }
         let c = Conversation(project: URL(fileURLWithPath: project), resumeID: resume)
         c.modelOverride = model
-        await c.loadHistory() // one batch: the caller takes it from items(), not as an event per item
+        _ = await c.loadEarlier() // the newest page, one batch: the caller takes it from items(), not as an event per item
         let id = c.sessionID
         if sessions[id] != nil { return id } // opened meanwhile
         sessions[id] = (c, project)
@@ -117,6 +122,13 @@ final class LocalAgentHost: AgentHost {
     }
     func info(_ session: String) async throws -> SessionInfo { try info(of: session) }
     func items(_ session: String) async throws -> [ChatItem] { try conversation(session).items }
+    func earlier(_ session: String) async throws -> [ChatItem] {
+        let c = try conversation(session)
+        let page = await c.loadEarlier()
+        // Already in place: later changes are measured from here, so the page is not sent again as events.
+        if sessions[session] != nil, let now = try? info(of: session) { sent[session] = (c.items, now) }
+        return page
+    }
 
     func events() -> AsyncStream<HostEvent> {
         let key = UUID()
@@ -167,7 +179,7 @@ final class LocalAgentHost: AgentHost {
     private func info(of session: String) throws -> SessionInfo {
         guard let (c, project) = sessions[session] else { throw HostError.noSession }
         return SessionInfo(id: session, project: project, state: c.state, model: c.model,
-                           contextPercent: c.contextPercent, subagents: c.subagents, topic: c.topic)
+                           contextPercent: c.contextPercent, subagents: c.subagents, topic: c.topic, earlier: c.hasEarlier)
     }
 
     /// Sends what changed since the last events for `session`.

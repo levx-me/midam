@@ -362,6 +362,98 @@ do {
     check(Conversation.transcript(project: project, id: "bbbbbbbb-0401-4abe-aa22-0ed9426ba823", home: home) == nil, "missing transcript")
 }
 
+// MARK: History paging — a large transcript read backwards a page at a time
+
+do {
+    // ~2,000 turns: prompts, replies and tool uses with multi-byte text, results on later lines
+    // (a teammate's 40 turns later, so across pages), long lines over several chunks, and lines
+    // that are no message (titles, system, meta, sidechain, snapshots, noise, blank).
+    func line(_ o: [String: Any]) -> String { ChatParse.json(o) }
+    var lines: [String] = [], pendingTask: [(due: Int, id: String)] = []
+    let sid = "9e01a96e-0401-4abe-aa22-0ed9426ba823"
+    for t in 0..<2000 {
+        let u = { (k: String) in "u-\(t)-\(k)" }
+        if t % 97 == 0 { lines.append(line(["type": "ai-title", "aiTitle": "제목 \(t / 97) 🎨", "sessionId": sid])) }
+        lines.append(line(["type": "user", "uuid": u("p"), "sessionId": sid, "isSidechain": false,
+                           "message": ["role": "user", "content": "질문 \(t): 한글과 emoji 🧪👩‍💻 " + String(repeating: "가", count: t % 50)]]))
+        if t % 13 == 0 { lines.append(line(["type": "user", "uuid": u("meta"), "isMeta": true, "message": ["role": "user", "content": "<command-name>/x</command-name>"]])) }
+        if t % 17 == 0 { lines.append(line(["type": "assistant", "uuid": u("side"), "isSidechain": true, "message": ["id": "side\(t)", "role": "assistant", "content": [["type": "text", "text": "inner"]]]])) }
+        if t % 5 == 0 { lines.append(line(["type": "system", "subtype": "stop_hook_summary"])); lines.append("") }
+        if t % 31 == 0 { lines.append("shell noise, not JSON 😶") ; lines.append(line(["type": "file-history-snapshot", "snapshot": [:] as [String: Any]])) }
+        let mid = "msg_\(t)"
+        let tool = "toolu_\(t)"
+        lines.append(line(["type": "assistant", "uuid": u("a1"), "message": ["id": mid, "role": "assistant", "model": "claude-test-1",
+                           "usage": ["input_tokens": 1000 + t], "content": [["type": "text", "text": "답 \(t) — " + String(repeating: "あ", count: (t * 7) % 40)]]]]))
+        lines.append(line(["type": "assistant", "uuid": u("a2"), "message": ["id": mid, "role": "assistant", "model": "claude-test-1",
+                           "content": [["type": "tool_use", "id": tool, "name": t % 3 == 0 ? "Write" : "Bash",
+                                        "input": t % 3 == 0 ? ["file_path": "/p/문서 \(t).md"] : ["command": "ls \(t)"]]]]]))
+        let long = t % 11 == 0 ? String(repeating: "긴 출력 🌊 ", count: 600) : "ok \(t)"
+        lines.append(line(["type": "user", "uuid": u("r"), "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": tool, "content": long, "is_error": t % 7 == 0]]]]))
+        if t % 50 == 0 {
+            let task = "task_\(t)"
+            lines.append(line(["type": "assistant", "uuid": u("t"), "message": ["id": mid + "t", "role": "assistant",
+                               "content": [["type": "tool_use", "id": task, "name": "Agent", "input": ["description": "팀원 \(t)", "prompt": "p"]]]]]))
+            pendingTask.append((t + 40, task))
+        }
+        for (_, task) in pendingTask.filter({ $0.due == t }) {
+            lines.append(line(["type": "user", "uuid": u("tr\(task)"), "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": task, "content": [["type": "text", "text": "끝 ✅"]]]]]]))
+        }
+        pendingTask.removeAll { $0.due == t }
+    }
+    let file = base.appendingPathComponent("big.jsonl")
+    try! fm.createDirectory(at: base, withIntermediateDirectories: true)
+    try! (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+
+    // The reader: every non-empty line, newest first, whole across chunk edges.
+    var all = TranscriptLines(url: file, chunk: 777)
+    let h = try! FileHandle(forReadingFrom: file)
+    var back: [String] = []
+    while let l = all.previous(h) { back.append(l) }
+    try? h.close()
+    check(back == lines.filter { !$0.isEmpty }.reversed(), "backward lines equal the file's lines reversed (\(back.count))")
+
+    var whole = ChatParse()
+    for l in lines { whole.transcript(l) }
+
+    // Pages as Conversation.loadEarlier makes them, newest first, merged with prepend.
+    for chunk in [777, 4096, 1 << 18] {
+        var reader = TranscriptLines(url: file, chunk: chunk), merged = ChatParse(), sizes: [Int] = []
+        while !reader.atStart {
+            var seed = ChatParse()
+            seed.laterResults = merged.laterResults
+            if merged.items.isEmpty { seed.topic = Conversation.headTopic(file) }
+            let page = Conversation.page(&reader, size: Conversation.pageSize, into: seed)
+            sizes.append(page.items.count)
+            merged.prepend(page)
+            if sizes.count == 1 { check(!reader.atStart, "the newest page leaves the rest of the file unread") }
+        }
+        check(merged.items == whole.items, "chunk \(chunk): pages concatenate to the whole history (\(merged.items.count) vs \(whole.items.count))")
+        check(Set(merged.items.map(\.id)).count == merged.items.count, "chunk \(chunk): no duplicate ids")
+        check(sizes.dropLast().allSatisfy { (50...51).contains($0) } && (1...51).contains(sizes.last ?? 0),
+              "chunk \(chunk): each page holds 50 items (one line may add one more), the oldest fewer: \(Set(sizes).sorted())")
+        check(merged.model == whole.model && merged.sessionID == whole.sessionID && merged.contextPercent == whole.contextPercent,
+              "chunk \(chunk): model, session and context from the newest page")
+    }
+    check(whole.items.count > 6000, "thousands of items: \(whole.items.count)")
+    check(whole.items.contains { if case .tool("Agent", _, _, let d, .done) = $0.kind { d.hasSuffix("끝 ✅") } else { false } }, "a teammate's later result is matched")
+
+    // Topic: the newest page's ai-title wins; with none in it, the transcript's head gives one.
+    var seed = ChatParse()
+    seed.topic = Conversation.headTopic(file)
+    check(seed.topic == "제목 1 🎨", "head topic is the last ai-title in the first 256 KB: \(seed.topic ?? "nil")")
+    var r = TranscriptLines(url: file)
+    check(Conversation.page(&r, size: Conversation.pageSize, into: seed).topic == "제목 1 🎨", "no ai-title in the newest page: the head's")
+    r = TranscriptLines(url: file)
+    check(Conversation.page(&r, size: 300, into: seed).topic == "제목 20 🎨", "an ai-title in the page wins")
+
+    // A transcript that is gone reads as empty, and a small one in one page.
+    var gone = TranscriptLines(url: base.appendingPathComponent("missing.jsonl"))
+    check(gone.atStart && Conversation.page(&gone, size: 50, into: ChatParse()).items.isEmpty, "missing transcript: nothing, at start")
+    var small = TranscriptLines(url: here.appendingPathComponent("fixtures/transcript.jsonl"), chunk: 100)
+    let one = Conversation.page(&small, size: 50, into: ChatParse())
+    check(small.atStart && kinds(one) == ["user", "tool:AskUserQuestion", "tool:Bash", "tool:Write", "assistant"], "fixture in one page: \(kinds(one))")
+}
+
 // MARK: AgentHost boundary
 
 do {
