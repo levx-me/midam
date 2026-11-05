@@ -239,6 +239,9 @@ private struct ChatRow: View {
     let ink: Color, muted: Color
     let last: Bool
     @State private var open = false
+    @AppStorage(Pref.font) private var font = ""
+    @AppStorage(Pref.size) private var size = Knob.size.initial
+    @AppStorage(Pref.leading) private var leading = Spacing.normal
 
     var body: some View {
         switch item.kind {
@@ -246,7 +249,10 @@ private struct ChatRow: View {
             HStack {
                 Spacer(minLength: 60)
                 VStack(alignment: .trailing, spacing: 2) {
+                    let type = ChatType(font: font, mono: "", size: size, leading: leading)
                     Text(verbatim: text)
+                        .font(type.body(type.pt))
+                        .lineSpacing(type.lineSpacing)
                         .textSelection(.enabled)
                         .foregroundStyle(ink)
                         .padding(.horizontal, 12)
@@ -326,30 +332,36 @@ private struct ChatRow: View {
 struct ChatMarkdownView: View {
     let markdown: String
     let ink: Color, muted: Color
+    @AppStorage(Pref.font) private var font = ""
+    @AppStorage(Pref.codeFont) private var codeFont = ""
+    @AppStorage(Pref.size) private var size = Knob.size.initial
+    @AppStorage(Pref.leading) private var leading = Spacing.normal
 
     var body: some View {
+        let type = ChatType(font: font, mono: codeFont, size: size, leading: leading)
+        let code = type.code(type.pt * 6 / 7)
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(ChatMarkdown.blocks(markdown).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let text):
-                    inline(text).font(.system(size: level == 1 ? 20 : level == 2 ? 17 : 15, weight: .semibold))
+                    inline(text, code).font(type.body(type.pt * (level == 1 ? 20 : level == 2 ? 17 : 15) / 14).weight(.semibold))
                         .padding(.top, 4)
                         .accessibilityAddTraits(.isHeader)
                 case .paragraph(let text):
-                    inline(text)
+                    inline(text, code)
                 case .item(let text, let marker, let indent):
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(verbatim: marker ?? "•").foregroundStyle(muted).monospacedDigit()
-                        inline(text)
+                        inline(text, code)
                     }
                     .padding(.leading, CGFloat(indent) * 16)
                 case .quote(let text):
-                    inline(text).foregroundStyle(muted)
+                    inline(text, code).foregroundStyle(muted)
                         .padding(.leading, 10)
                         .overlay(alignment: .leading) { Rectangle().fill(muted.opacity(0.4)).frame(width: 3) }
                 case .code(let text):
                     ScrollView(.horizontal, showsIndicators: false) {
-                        Text(verbatim: text).font(.system(size: 12, design: .monospaced)).foregroundStyle(ink).textSelection(.enabled)
+                        Text(verbatim: text).font(code).foregroundStyle(ink).textSelection(.enabled)
                             .padding(10)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -359,16 +371,32 @@ struct ChatMarkdownView: View {
                 }
             }
         }
-        .font(.system(size: 14))
-        .lineSpacing(3)
+        .font(type.body(type.pt))
+        .lineSpacing(type.lineSpacing)
         .foregroundStyle(ink)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func inline(_ s: String) -> Text {
-        let a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+    private func inline(_ s: String, _ code: Font) -> Text {
+        var a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+        for run in a.runs where run.inlinePresentationIntent?.contains(.code) == true { a[run.range].font = code }
         return Text(a)
+    }
+}
+
+/// The reading settings documents use (Settings › Fonts, Format › Bigger / Smaller), sized for
+/// chat: 14 pt at 100%, the code font at 12 pt, and Normal line spacing the 3 pt chat had before.
+struct ChatType {
+    let font: String, mono: String, size: Double, leading: Int
+
+    var pt: CGFloat { 14 * size }
+    /// The page's line-height (1.75 / 2.05 / 2.35) is for long reading; chat keeps a quarter of
+    /// the gap above a plain 1.2 line, so the presets still differ.
+    var lineSpacing: CGFloat { pt * (Spacing.leading.value(leading) - 1.2) / 4 }
+    func body(_ pt: CGFloat) -> Font { Font(Fonts.ns(Fonts.isInstalled(font) ? font : "", size: pt)) }
+    func code(_ pt: CGFloat) -> Font {
+        Fonts.isInstalled(mono) ? Font(Fonts.ns(mono, size: pt)) : .system(size: pt, design: .monospaced)
     }
 }
 
