@@ -57,6 +57,10 @@ write(t1, [
     tool("Write", repo + "/gone.md", cwd: repo),
     tool("Write", repo + "/was-here.md", cwd: repo),
 ].joined(separator: "\n") + "\n")
+// A session started in a folder since moved into `repo`: it belongs to repo (the latest cwd).
+let moved = home + "/.claude/projects/-moved-app/m.jsonl"
+write(moved, [#"{"type":"user","cwd":"/moved/app"}"#, tool("Write", repo + "/docs/MANUAL.md", cwd: repo),
+           #"{"type":"user","cwd":"\#(home)/.claude/projects/-moved-app/m/subagents"}"#].joined(separator: "\n") + "\n", age: 3_600)
 let t2 = home + "/.claude/projects/-elsewhere-app/old.jsonl"
 write(t2, tool("Write", other + "/old.md", cwd: other) + "\n", age: 8 * 86_400)
 // Codex: a session in `other` that ran from 2 h ago to 30 min ago; README changed then, old.md now.
@@ -72,8 +76,8 @@ let scan = LibraryScanner(env: env)
 
 // Sources: registered projects only, any age.
 assert(scan.claudeTranscripts(registered: []).isEmpty)
-assert(scan.claudeTranscripts(registered: [repo]) == [t1])
-assert(scan.claudeTranscripts(registered: [repo, other]) == [t1, t2]) // the 8-day-old one counts too
+assert(scan.claudeTranscripts(registered: [repo]) == [t1, moved]) // moved by its latest cwd
+assert(scan.claudeTranscripts(registered: [repo, other]) == [t1, moved, t2]) // the 8-day-old one counts too
 assert(scan.codexSessions(registered: [other]) == [c1] && scan.codexSessions(registered: [repo]).isEmpty)
 let claude = scan.claudeHits(t1)
 let codex = scan.codexHits(c1)

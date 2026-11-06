@@ -683,16 +683,30 @@ final class LibraryScanner {
         return out.sorted { $0.1 > $1.1 }
     }
 
-    /// The project a Claude project folder is about: the repo root of its newest session's cwd.
+    /// The project a Claude project folder is about now: the repo root of its newest session's latest
+    /// cwd. Claude keeps a session in the folder it started in, so a repo that moved since (or a
+    /// session that `cd`'d) is found where it is now, like RecentSessions.
     private func slugRoot(_ files: [(String, Date)]) -> String? {
         for (path, _) in files.prefix(3) {
             guard let h = FileHandle(forReadingAtPath: path) else { continue }
-            let data = (try? h.read(upToCount: 262_144)) ?? Data()
+            let size = (try? h.seekToEnd()) ?? 0
+            try? h.seek(toOffset: size > 262_144 ? size - 262_144 : 0)
+            let data = (try? h.readToEnd()) ?? Data()
             try? h.close()
-            let cwd = data.withUnsafeBytes { buf in buf.baseAddress.flatMap { Self.firstCwd($0, buf.count) } }
+            let cwd = data.withUnsafeBytes { buf in buf.baseAddress.flatMap { Self.lastCwd($0, buf.count, skipping: claudeDir + "/") } }
             if let cwd { return sessionRoot(cwd) }
         }
         return nil
+    }
+
+    /// The last `"cwd":"…"` value not under `prefix` (subagents run from ~/.claude/projects/…).
+    private static func lastCwd(_ base: UnsafeRawPointer, _ n: Int, skipping prefix: String) -> String? {
+        var at = 0, last: String?
+        while at < n, let i = find("\"cwd\":\"", base + at, n - at) {
+            if let c = firstCwd(base + at + i, n - at - i), !c.hasPrefix(prefix) { last = c }
+            at += i + 7
+        }
+        return last
     }
 
     private func sessionRoot(_ cwd: String) -> String? {
