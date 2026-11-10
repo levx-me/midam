@@ -229,6 +229,13 @@ const read = f => fs.readFileSync(R + f, "utf8");
   check("then mermaid draws it in place, in the same figure", post.same && post.svg, post);
   check("drawing it keeps the line being read where it was", Math.abs(post.top - pre.top) < 1, [pre.top, post.top]);
   check("the drawn page goes to the render cache", post.html, post);
+  const saved = await cold.evaluate(async () => {
+    const y = scrollY, md = "# Top\n\n" + "Text.\n\n".repeat(40) + "```mermaid\nflowchart TB\n  Alpha --> Beta --> Gamma --> Delta\n```\n\n" +
+      Array.from({ length: 200 }, (_, i) => "Line " + i + ".").join("\n\n");
+    await midamRender(md.replace("Line 3.", "Line three."), "", {});
+    return [y, scrollY];
+  });
+  check("a save re-renders where the reader was, not at the top", saved[0] > 0 && saved[0] === saved[1], saved);
 
   // 7. Find typed letter by letter, then closed. Each match gets a box in a layer outside the views
   // (the CSS Custom Highlight API painted offset and left stale boxes in the system WebKit): one

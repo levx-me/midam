@@ -91,7 +91,13 @@ async function midamRender(md, base, words, baseline) {
     const fresh = next.querySelectorAll("figure.diagram"), kept = shown.querySelectorAll("figure.diagram");
     fresh.forEach((f, i) => { if (kept[i] && diagramSource.has(f)) diagramSource.set(kept[i], diagramSource.get(f)); });
     root = shown;
-  } else shown.replaceWith(next);
+  } else {
+    // WebKit drops the scroll position when the swap brings in mermaid's SVGs (back to the top on
+    // every save): put the reader back where they were.
+    const y = scrollY;
+    shown.replaceWith(next);
+    if (scrollY !== y) scrollTo(0, y);
+  }
   cachedHTML = null;
   document.querySelector("body > #source").replaceWith(source);
   startSpy();
