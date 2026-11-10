@@ -1,5 +1,5 @@
 // Checks the table of contents outline from render.js (headingId, outlineHeads, midamOutline) on
-// stand-in heading elements: levels h1-h3 only, ids (repeats, app ids, prototype names), plain
+// stand-in heading elements: levels h1-h4 only, ids (repeats, app ids, prototype names), plain
 // text with hostile HTML kept as text, and the size bounds. Run: node tools/outline-test.js
 const fs = require("fs"), path = require("path");
 const src = fs.readFileSync(path.join(__dirname, "../Resources/render.js"), "utf8");
@@ -16,15 +16,15 @@ const check = (name, ok, info) => { n++; if (!ok) { bad++; console.log("FAIL", n
 const newSeen = new Function("return " + src.match(/const seen = ([^;]+);/)[1]);
 function doc(list) {
   const seen = newSeen(), all = list.map(([tag, text, id]) => ({ tagName: tag, textContent: text, id: id ?? headingId(text, seen) }));
-  return { querySelectorAll: sel => (check("selector", sel === "h1,h2,h3", sel), all.filter(h => /^H[123]$/.test(h.tagName))) };
+  return { querySelectorAll: sel => (check("selector", sel === "h1,h2,h3,h4", sel), all.filter(h => /^H[1234]$/.test(h.tagName))) };
 }
 const outline = list => midamOutline(outlineHeads(doc(list)));
 
-const o = outline([["H1", "Midam"], ["H2", "Intro"], ["H3", "Detail"], ["H4", "Too deep"], ["H2", "Intro"], ["H2", "Intro"],
+const o = outline([["H1", "Midam"], ["H2", "Intro"], ["H3", "Detail"], ["H4", "Deeper"], ["H5", "Too deep"], ["H2", "Intro"], ["H2", "Intro"],
   ["H2", "Source"], ["H3", "constructor"], ["H3", "toString"], ["H3", "constructor"], ["H2", "__proto__"]]);
-check("levels, h4 skipped", JSON.stringify(o.map(h => h.level)) === "[1,2,3,2,2,2,3,3,3,2]", o);
+check("levels, h5 skipped", JSON.stringify(o.map(h => h.level)) === "[1,2,3,4,2,2,2,3,3,3,2]", o);
 check("ids: repeats numbered, app id taken, prototype names plain",
-  JSON.stringify(o.map(h => h.id)) === '["midam","intro","detail","intro-1","intro-2","source-1","constructor","tostring","constructor-1","proto"]', o.map(h => h.id));
+  JSON.stringify(o.map(h => h.id)) === '["midam","intro","detail","deeper","intro-1","intro-2","source-1","constructor","tostring","constructor-1","proto"]', o.map(h => h.id));
 check("only level, text and id, as number and strings",
   o.every(h => JSON.stringify(Object.keys(h)) === '["level","text","id"]' && typeof h.level === "number" && typeof h.text === "string" && typeof h.id === "string"), o);
 

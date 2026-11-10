@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The table of contents, in the panel's Contents tab (⌥⌘T): the document's h1-h3 as an outline,
+/// The table of contents, in the panel's Contents tab (⌥⌘T): the document's h1-h4 as an outline,
 /// the section being read marked and kept in view. It never opens by itself when a document opens.
 struct TocList: View {
     let page: Page

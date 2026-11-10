@@ -632,7 +632,7 @@ final class PageWebView: WKWebView {
     var focusRequest = 0
     /// Showing the raw Markdown instead of the reading view (per window, off by default).
     var source = false
-    /// The table of contents: h1-h3 from the last render, and the anchor of the section being read.
+    /// The table of contents: h1-h4 from the last render, and the anchor of the section being read.
     var outline: [Heading] = []
     var tocCurrent: String?
     /// Places changed since the version last read (V3), from the last render; 0 with no baseline.

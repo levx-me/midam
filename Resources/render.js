@@ -157,14 +157,14 @@ function headingId(text, seen) {
   return id + "-" + ++seen[id];
 }
 
-// Table of contents: the reading view's h1-h3 as plain text (the app shows it as SwiftUI Text),
+// Table of contents: the reading view's h1-h4 as plain text (the app shows it as SwiftUI Text),
 // with ids and sizes bounded. Headings without text or an id are left out.
 const outlineText = h => {
   const t = h.textContent.replace(/\s+/g, " ").trim();
   return t.length > 200 ? Array.from(t).slice(0, 200).join("") : t;
 };
 const outlineHeads = root =>
-  [...root.querySelectorAll("h1,h2,h3")].filter(h => h.id && h.id.length <= 512 && outlineText(h)).slice(0, 500);
+  [...root.querySelectorAll("h1,h2,h3,h4")].filter(h => h.id && h.id.length <= 512 && outlineText(h)).slice(0, 500);
 const midamOutline = heads => heads.map(h => ({ level: Number(h.tagName[1]), text: outlineText(h), id: h.id }));
 
 // The section being read: the last outline heading at or above the line a jump to it lands on

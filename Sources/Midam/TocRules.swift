@@ -10,12 +10,12 @@ struct Heading: Identifiable, Equatable {
     let text: String
     let anchor: String
 
-    /// An outline from render.js, checked: h1-h3, bounded text and ids, at most 500. Nil when
+    /// An outline from render.js, checked: h1-h4, bounded text and ids, at most 500. Nil when
     /// it is not an outline.
     static func outline(_ value: Any?) -> [Heading]? {
         guard let list = value as? [[String: Any]] else { return nil }
         return list.prefix(500).enumerated().compactMap { i, d in
-            guard let level = d["level"] as? Int, (1...3).contains(level),
+            guard let level = d["level"] as? Int, (1...4).contains(level),
                   let text = d["text"] as? String, !text.isEmpty,
                   let anchor = d["id"] as? String, !anchor.isEmpty, anchor.utf16.count <= 512
             else { return nil }
