@@ -29,7 +29,7 @@ enum PanelTab: String, CaseIterable {
 
     var keys: [KeyboardShortcut] {
         switch self {
-        case .find: [.find, .findSlash]
+        case .find: [.find]
         case .toc: [.tableOfContents]
         case .shortcuts: [.shortcuts]
         case .reply: [.addNote]

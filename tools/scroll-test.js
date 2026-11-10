@@ -1,4 +1,4 @@
-// Checks the Vim page-key distance from render.js: the page below the header less a line, by
+// Checks the Space / ⇧Space page distance from render.js: the page below the header less a line, by
 // fraction, never under one line. Run: node tools/scroll-test.js
 const src = require("fs").readFileSync(require("path").join(__dirname, "../Resources/render.js"), "utf8");
 const pageStep = new Function(src.match(/const pageStep = [^\n]+\n/)[0] + "return pageStep;")();

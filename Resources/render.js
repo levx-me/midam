@@ -340,7 +340,7 @@ function tint(el, text, language) {
   el.classList.add("hljs");
 }
 
-// Vim-style page keys (d u e f b): a fraction of the page visible below the header, less a line
+// Space / ⇧Space: a fraction of the page visible below the header, less a line
 // of overlap so the reader keeps their place; smooth unless Reduce Motion is on. Both views.
 const pageStep = (height, header, fraction) => Math.max(40, Math.round((height - header - 40) * fraction));
 function midamScrollPage(fraction) {

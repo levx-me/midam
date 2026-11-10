@@ -696,12 +696,8 @@ final class PageWebView: WKWebView {
         // duration, so a long document's top or bottom does not take seconds.
         case top = "scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })"
         case bottom = "scrollTo({ top: document.documentElement.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })"
-        case pageDown = "midamScrollPage(1)" // Space, ⇧Space: the same step as f / b
+        case pageDown = "midamScrollPage(1)" // Space, ⇧Space
         case pageUp = "midamScrollPage(-1)"
-        case lineDown = "scrollBy(0, 40)"
-        case lineUp = "scrollBy(0, -40)"
-        case halfPageDown = "midamScrollPage(0.5)"
-        case halfPageUp = "midamScrollPage(-0.5)"
     }
 
     func scroll(_ s: Scroll) { run(s.rawValue) }

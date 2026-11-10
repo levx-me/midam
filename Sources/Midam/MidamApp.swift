@@ -52,7 +52,6 @@ struct MidamApp: App {
         }
         CommandGroup(replacing: .saveItem) {
             Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTab)
-            Button("Close Tab") { store.closeCurrent() }.keyboardShortcut(.closeTabX).disabled(store.current == nil || store.findFocused)
             Button("Clear Scrollback") { store.currentAgent?.terminal?.clear() }
                 .keyboardShortcut(.clearScrollback).disabled(store.currentAgent?.terminal == nil)
             Divider()
@@ -62,7 +61,6 @@ struct MidamApp: App {
         CommandGroup(after: .textEditing) {
             Divider()
             Button("Find…") { find() }.keyboardShortcut(.find).disabled(page == nil && !store.sidebarOpen)
-            Button("Find…") { page?.show() }.keyboardShortcut(.findSlash).disabled(page == nil || store.findFocused)
             Button("Find Next") { page?.step(1) }.keyboardShortcut(.findNext).disabled(page == nil)
             Button("Find Previous") { page?.step(-1) }.keyboardShortcut(.findPrevious).disabled(page == nil)
             Divider()
@@ -130,20 +128,9 @@ struct MidamApp: App {
             Divider()
             go("Page Down", .pageDown, .pageDown)
             go("Page Up", .pageUp, .pageUp)
-            Section("Vim") {
-                go("Line Down", .lineDown, .lineDown)
-                go("Line Up", .lineUp, .lineUp)
-                go("Half Page Down", .halfPageDown, .halfPageDown)
-                go("Half Page Up", .halfPageUp, .halfPageUp)
-                go("Half Page Up", .halfPageUp, .halfPageUpE)
-                go("Page Down", .pageDown, .vimPageDown)
-                go("Page Up", .pageUp, .vimPageUp)
-                go("Top", .top, .vimTop) // gg reads as g twice: still the top
-                go("Bottom", .bottom, .vimBottom)
-            }
             Divider()
-            Button("Next Change") { page?.stepChange(1) }.keyboardShortcut(.nextChange).disabled(page == nil || store.findFocused)
-            Button("Previous Change") { page?.stepChange(-1) }.keyboardShortcut(.previousChange).disabled(page == nil || store.findFocused)
+            Button("Next Change") { page?.stepChange(1) }.disabled(page == nil)
+            Button("Previous Change") { page?.stepChange(-1) }.disabled(page == nil)
         }
         CommandGroup(replacing: .help) {
             Button("Keyboard Shortcuts") { store.togglePanel(.shortcuts) }.keyboardShortcut(.shortcuts)

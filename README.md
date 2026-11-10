@@ -83,11 +83,11 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | --- | --- |
 | ⌘O | Open file |
 | ⌘T | New tab: into the sidebar's list (↩ opens the document in a new tab; ⌘T or Esc back to the page) |
-| ⌘W or x | Close tab |
+| ⌘W | Close tab |
 | ⌘1–9 | Go to tab (⌘9: last tab) |
 | ⌘[ / ⌘], two-finger swipe | Back / forward |
 | ⌃Tab / ⌃⇧Tab, ⇧⌘[ / ⇧⌘] | Next / previous tab; ⇧⌘[ previous, ⇧⌘] next |
-| ⌘F or / , ⌘G / ⇧⌘G | Find: the panel's Find tab, every match listed / next / previous (Esc back to the page) |
+| ⌘F, ⌘G / ⇧⌘G | Find: the panel's Find tab, every match listed / next / previous (Esc back to the page) |
 | ⌘+ / ⌘− / ⌘0 | Text size larger / smaller / default |
 | ⌘/ | Toggle Reading / Source (also the </> button in the header) |
 | ⌥⌘I | Show / hide the right panel (also the panel button at the header's right) |
@@ -98,8 +98,6 @@ The Swift checks in `tools/FontSchemeTest`, `tools/NavHistoryTest`, `tools/TocTe
 | ⌥⌘R | Show in Finder |
 | ⌃⌘F | Full screen |
 | Space / ⇧Space, ⌘↓ / ⌘↑ | Page down / up, bottom / top |
-| j / k, G / g | Line down / up, bottom / top (Vim style; off while typing in Find) |
-| d / u (or e), f / b | Half page down / up, full page down / up (Vimium style) |
 | m | Note on the selected passage (also the Add Note button by a selection); off while typing |
 | ⌘↩ | Send the reply: to the agent waiting in `midam review`, else to the clipboard |
 | ⌘, | Settings |

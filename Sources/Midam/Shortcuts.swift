@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Every key the menus bind, named once: the menus use these, and the shortcuts help shows them,
 /// so the two cannot drift. Keys handled outside the menus (⇧⌘[ ], ⌃⌘F, ⌘1-8) are listed as text.
-/// Bare keys (Space, j k g G d u e f b, n N, m, /, x) are menu items too; Store.singleKeyBypass keeps
+/// Bare keys (Space, ⇧Space, m) are menu items too; Store.singleKeyBypass keeps
 /// them out of text fields and other windows.
 extension KeyboardShortcut {
     static let open = KeyboardShortcut("o")
@@ -10,10 +10,8 @@ extension KeyboardShortcut {
     static let clearScrollback = KeyboardShortcut("k") // in an agent's terminal tab, as in Terminal
     static let newTab = KeyboardShortcut("t") // into the sidebar's list, as a browser's new tab; ⇧⌘T is kept for reopening a closed tab
     static let closeTab = KeyboardShortcut("w")
-    static let closeTabX = KeyboardShortcut("x", modifiers: []) // as in Vimium
     static let showInFinder = KeyboardShortcut("r", modifiers: [.command, .option])
     static let find = KeyboardShortcut("f")
-    static let findSlash = KeyboardShortcut("/", modifiers: [])
     static let findNext = KeyboardShortcut("g")
     static let findPrevious = KeyboardShortcut("g", modifiers: [.command, .shift])
     static let switchView = KeyboardShortcut("/")
@@ -35,17 +33,6 @@ extension KeyboardShortcut {
     static let bottom = KeyboardShortcut(.downArrow)
     static let pageDown = KeyboardShortcut(.space, modifiers: [])
     static let pageUp = KeyboardShortcut(.space, modifiers: .shift)
-    static let lineDown = KeyboardShortcut("j", modifiers: [])
-    static let lineUp = KeyboardShortcut("k", modifiers: [])
-    static let vimTop = KeyboardShortcut("g", modifiers: [])
-    static let vimBottom = KeyboardShortcut("g", modifiers: .shift)
-    static let halfPageDown = KeyboardShortcut("d", modifiers: [])
-    static let halfPageUp = KeyboardShortcut("u", modifiers: [])
-    static let halfPageUpE = KeyboardShortcut("e", modifiers: [])
-    static let vimPageDown = KeyboardShortcut("f", modifiers: [])
-    static let vimPageUp = KeyboardShortcut("b", modifiers: [])
-    static let nextChange = KeyboardShortcut("n", modifiers: []) // changes since last read, as Vim's next match
-    static let previousChange = KeyboardShortcut("n", modifiers: .shift)
     static let addNote = KeyboardShortcut("m", modifiers: []) // a note on the selected passage (V6)
     static let sendReply = KeyboardShortcut(.return) // ⌘↩, as Mail's Send
     static let bigger = KeyboardShortcut("+")
@@ -87,7 +74,7 @@ struct Shortcut {
     static let source = Shortcut("Reading ↔ Source", .switchView)
     static let contents = Shortcut("Toggle Table of Contents", .tableOfContents)
     static let backForward = Shortcut("Back · forward", .back, .forward)
-    static let find = Shortcut("Find", .find, .findSlash)
+    static let find = Shortcut("Find", .find)
     static let searchSidebar = Shortcut("Search the sidebar (list focused)", .find)
     static let help = Shortcut("Keyboard Shortcuts", .shortcuts)
 }
@@ -104,7 +91,7 @@ struct ShortcutGroup {
             Shortcut("Open a document", .open),
             .newAgent,
             Shortcut("New tab from the sidebar · back to the page", .newTab),
-            Shortcut("Close Tab", .closeTab, .closeTabX),
+            Shortcut("Close Tab", .closeTab),
             Shortcut("Tab 1–8 · last tab", text: "⌘1–8", KeyboardShortcut.lastTab.glyph),
             Shortcut("Next · previous tab", .nextTab, .previousTab),
             Shortcut("Next · previous tab", text: "⇧⌘]", "⇧⌘["), // PageWebView, as in Safari
@@ -115,11 +102,6 @@ struct ShortcutGroup {
             Shortcut("Back · forward", gesture: "Two-finger swipe"),
             Shortcut("Page down · up", .pageDown, .pageUp),
             Shortcut("Bottom · top", .bottom, .top),
-            Shortcut("Line down · up", .lineDown, .lineUp),
-            Shortcut("Half page down · up", .halfPageDown, .halfPageUp, .halfPageUpE),
-            Shortcut("Page down · up", .vimPageDown, .vimPageUp),
-            Shortcut("Bottom · top", .vimBottom, .vimTop),
-            Shortcut("Next · previous change", .nextChange, .previousChange),
         ]),
         ShortcutGroup("View", [
             .sidebar,

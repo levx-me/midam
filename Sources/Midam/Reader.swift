@@ -117,12 +117,11 @@ import UserNotifications
     /// ⌘-shortcut never shows them: its key cancels the wait.
     @Published private(set) var shortcutHintsVisible = false
     private var hintWait: Task<Void, Never>?
-    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, j k g G d u e f b, n N, m (note), / (find), x (close tab).
-    private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .lineDown, .lineUp, .vimTop, .vimBottom,
-                                         .halfPageDown, .halfPageUp, .halfPageUpE, .vimPageDown, .vimPageUp,
-                                         .findSlash, .closeTabX, .nextChange, .addNote]
+    /// The menus' single keys (no ⌘, ⌃ or ⌥): Space, ⇧Space, m (note). No Vim keys: a system-wide
+    /// Vim layer (vimos) must get its keys through untouched.
+    private static let singleKeys = Set([KeyboardShortcut.pageDown, .pageUp, .addNote]
                                          .map { String($0.key.character).lowercased() })
-    /// The find field has focus: single-key Go shortcuts (Space, j, k, g, G) stand down.
+    /// The find field has focus: single-key shortcuts (Space, ⇧Space, m) stand down.
     @Published var findFocused = false
     @Published private(set) var recents: [URL] = NSDocumentController.shared.recentDocumentURLs
     var quitting = false
@@ -972,7 +971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct ReaderView: View {
     @ObservedObject var store: Store
     @AppStorage(Pref.font) private var font = ""
-    @AppStorage(Pref.codeFont) private var codeFont = ""
+    @AppStorage(Pref.codeFont) private var codeFont = Pref.defaultCodeFont
     @AppStorage(Pref.size) private var size = Knob.size.initial
     @AppStorage(Pref.tracking) private var tracking = Spacing.normal
     @AppStorage(Pref.leading) private var leading = Spacing.normal
@@ -1319,7 +1318,7 @@ struct FileTab: View {
             .opacity(hover ? 1 : 0)
             .focusable(false)
             .accessibilityHidden(true) // the tab's own Close Tab action, and ⌘W, cover it
-            .fastTip(Text("Close Tab") + Text(verbatim: " (\(KeyboardShortcut.closeTab.glyph), \(KeyboardShortcut.closeTabX.glyph))"))
+            .fastTip(Text("Close Tab") + Text(verbatim: " (\(KeyboardShortcut.closeTab.glyph))"))
         }
         .shortcutHint(keys: store.tabKeys(file.id), shown: store.shortcutHintsVisible)
         .onHover { hover = $0 }
