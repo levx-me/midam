@@ -343,7 +343,7 @@ struct ChatMarkdownView: View {
     let markdown: String
     let ink: Color, muted: Color
     @AppStorage(Pref.font) private var font = ""
-    @AppStorage(Pref.codeFont) private var codeFont = ""
+    @AppStorage(Pref.codeFont) private var codeFont = Pref.defaultCodeFont
     @AppStorage(Pref.size) private var size = Knob.size.initial
     @AppStorage(Pref.leading) private var leading = Spacing.normal
 

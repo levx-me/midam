@@ -7,6 +7,7 @@ import SwiftUI
 enum Pref {
     static let font = "bodyFont"       // font family name, "" = system
     static let codeFont = "codeFont"   // monospaced family name, "" = system monospaced
+    static let defaultCodeFont = "Source Code Pro" // bundled; narrower than SF Mono, so code reads as code
     static let size = "textSize"       // multiplier on the responsive 16-18 px body size
     static let tracking = "letterSpacingPreset"     // Spacing preset index (0, 1, 2)
     static let leading = "lineHeightPreset"
@@ -282,6 +283,7 @@ enum BundledFonts {
         Face("JetBrainsMono", "JetBrains Mono", mono: true), Face("JetBrainsMono-Italic", "JetBrains Mono", italic: true, mono: true),
         Face("GeistMono", "Geist Mono", mono: true), Face("GeistMono-Italic", "Geist Mono", italic: true, mono: true),
         Face("D2Coding", "D2Coding", "400", mono: true), Face("D2Coding-Bold", "D2Coding", "700", mono: true),
+        Face("SourceCodePro", "Source Code Pro", "200 900", mono: true), Face("SourceCodePro-Italic", "Source Code Pro", "200 900", italic: true, mono: true),
     ]
 
     static let families = Set(faces.map(\.family))
@@ -353,6 +355,7 @@ enum RecommendedFonts {
     ]
 
     private static let codeCandidates = [
+        Candidate("Source Code Pro", hint: "Made for code", builtIn: true),
         Candidate("JetBrains Mono", hint: "Made for code", builtIn: true),
         Candidate("Geist Mono", hint: "Clean Latin mono", builtIn: true),
         Candidate("D2Coding", hint: "Korean coding font", builtIn: true),
@@ -587,7 +590,7 @@ struct ThemePreview: View {
 // MARK: Format menu
 
 @MainActor struct FormatMenu: Commands {
-    @AppStorage(Pref.codeFont) private var codeFont = ""
+    @AppStorage(Pref.codeFont) private var codeFont = Pref.defaultCodeFont
     @AppStorage(Pref.size) private var size = Knob.size.initial
     @AppStorage(Pref.tracking) private var tracking = Spacing.normal
     @AppStorage(Pref.leading) private var leading = Spacing.normal
@@ -939,7 +942,7 @@ struct FontSettings: View {
     enum ListTab: Hashable { case recommended, all }
 
     @AppStorage(Pref.font) private var font = ""
-    @AppStorage(Pref.codeFont) private var codeFont = ""
+    @AppStorage(Pref.codeFont) private var codeFont = Pref.defaultCodeFont
     @State private var query = ""
     @State private var tab = ListTab.recommended
     private let fonts = Fonts.all

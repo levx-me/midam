@@ -17,11 +17,12 @@ with fontTools: the glyphs, names and tables are unchanged, and nothing is subse
 | Plus Jakarta Sans | PlusJakartaSans, -Italic | 125 | tokotype/PlusJakartaSans 2.7.1 (variable, TTF re-encoded) | OFL-1.1, © 2020 The Plus Jakarta Sans Project Authors |
 | JetBrains Mono | JetBrainsMono, -Italic | 231 | JetBrains/JetBrainsMono v2.304 (fonts/variable, TTF re-encoded) | OFL-1.1, © 2020 The JetBrains Mono Project Authors |
 | Geist Mono | GeistMono, GeistMono-Italic | 147 | vercel/geist-font v1.8.1 (GeistMono/webfonts) | OFL-1.1, © 2023 Vercel with basement.studio |
+| Source Code Pro | SourceCodePro, SourceCodePro-Italic | 162 | adobe-fonts/source-code-pro 2.042R-u/1.062R-i/1.026R-vf (WOFF2/VF, TTF flavour); the default code font | OFL-1.1, © 2023 Adobe, RFN "Source" |
 | D2Coding | D2Coding, D2Coding-Bold | 2992 | naver/d2codingfont VER1.3.2 (static TTF re-encoded) | OFL-1.1, © 2015 NAVER Corp., RFN "D2Coding" |
 
 | KaTeX (math only) | KaTeX_*.woff2 (20 files) | 296 | KaTeX 0.19.0 (npm `katex`, dist/fonts) | MIT, © 2013-2020 Khan Academy and other contributors |
 
-Total: 7660 KB on disk.
+Total: 7822 KB on disk.
 
 The KaTeX fonts are not registered with the app and not offered as reading fonts: only the page's
 math uses them, through `Resources/katex.min.css`, whose `url()`s were rewritten to
