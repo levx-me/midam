@@ -1377,14 +1377,7 @@ private struct DocRow: View {
         return url
     }
 
-    private var secondLine: String { [writer, Words.ago(doc.modified)].compactMap { $0 }.joined(separator: " · ") }
-
-    /// The agent that wrote it: its conversation's topic, else the agent's name.
-    private var writer: String? {
-        let library = LibraryModel.shared
-        guard let s = library.session(for: url.path) else { return nil }
-        return library.conversations.first { $0.sessionID == s.id }?.topic ?? (s.agent == .codex ? "Codex" : "Claude")
-    }
+    private var secondLine: String { [doc.folder, Words.ago(doc.modified)].compactMap { $0 }.joined(separator: " · ") }
 
     private var label: String {
         var parts = [doc.title]

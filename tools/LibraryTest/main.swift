@@ -182,10 +182,10 @@ assert(Library.split("/a/b.zh-CN.md") == ("/a/b.md", "zh-CN"))
 assert(Library.split("/a/v1.0.md").lang == nil && Library.split("/a/config.zzz.md").lang == nil)
 
 // Folder line.
-assert(info("v1-spec.md").folder == "")                           // docs/ dropped
-assert(info("handoff.md").folder == "~/…/c")                      // worktree path is outside the main root
-assert(Library.folderLine(dir: repo + "/docs/a/b/c/d", root: repo, home: home) == "a/…/d")
-assert(info("report-design.md").folder == "~/.claude/rules")
+assert(info("v1-spec.md").folder == "docs/v1-spec.md")
+assert(info("handoff.md").folder == "~/work/app-wt/docs/deep/a/b/c/handoff.md") // worktree path is outside the main root
+assert(Library.pathLine(file: repo + "/docs/a/b.md", root: repo, home: home) == "docs/a/b.md")
+assert(info("report-design.md").folder == "~/.claude/rules/report-design.md")
 
 // Unread: never opened, opened after the change, changed after the open.
 let spec = info("v1-spec.md")

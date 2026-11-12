@@ -12,7 +12,7 @@ struct LibraryDoc: Identifiable, Hashable, Sendable {
     var variants: [DocVariant]  // base first, then by lang
     var langLabel: String?      // "EN · KO" when variants.count > 1, else nil
     var title: String           // first "# heading", else file name
-    var folder: String          // shortened folder path for line 2
+    var folder: String          // file path from the project root, for line 2
     var modified: Date          // newest variant mtime
     var kind: DocKind
     var deleted: Bool
@@ -300,20 +300,13 @@ enum Library {
         }
     }
 
-    // MARK: Folder line (D8)
+    // MARK: Path line (D8)
 
-    static func folderLine(dir: String, root: String, home: String) -> String {
-        var comps: [String]
-        if dir == root || dir.hasPrefix(root + "/") {
-            comps = dir.dropFirst(root.count).split(separator: "/").map(String.init)
-            if comps.first == "docs" { comps.removeFirst() }
-        } else if dir == home || dir.hasPrefix(home + "/") {
-            comps = ["~"] + dir.dropFirst(home.count).split(separator: "/").map(String.init)
-        } else {
-            comps = [""] + dir.split(separator: "/").map(String.init)
-        }
-        if comps.count > 3 { comps = [comps[0], "…", comps[comps.count - 1]] }
-        return comps.joined(separator: "/")
+    /// The file's path for a row's second line: from the project root, else from ~, else absolute.
+    static func pathLine(file: String, root: String, home: String) -> String {
+        if file.hasPrefix(root + "/") { return String(file.dropFirst(root.count + 1)) }
+        if file.hasPrefix(home + "/") { return "~" + file.dropFirst(home.count) }
+        return file
     }
 
     // MARK: Unread, grouping, order
@@ -994,7 +987,7 @@ final class LibraryScanner {
             let sorted = all.sorted { ($0.lang ?? "") < ($1.lang ?? "") }
             let project = projectOf[sorted[0].path]!
             let dir = (id as NSString).deletingLastPathComponent
-            let folder = Library.folderLine(dir: dir, root: project, home: env.home)
+            let folder = Library.pathLine(file: id, root: project, home: env.home)
             let present = sorted.compactMap { v in Self.mtime(v.path).map { (v, $0) } }
             guard let main = present.first else {
                 if let k = known[id] {
